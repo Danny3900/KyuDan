@@ -57,7 +57,7 @@ VAL_SIZE = 100_000     # 從訓練集切出來的驗證集大小
 
 BATCH_SIZE = 256
 LEARNING_RATE = 1e-3
-NUM_EPOCHS = 5
+NUM_EPOCHS = 20
 NUM_CLASSES = len(LEVELS)
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
