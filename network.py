@@ -5,9 +5,9 @@ class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(channels)
+        self.bn1 = nn.BatchNorm2d(channels,momentum=0.01)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(channels)
+        self.bn2 = nn.BatchNorm2d(channels,momentum=0.01)
 
     def forward(self, x):
         residual = x
@@ -22,16 +22,17 @@ class GoRankResNet(nn.Module):
     Input: (B, 500, 19, 19)
     Output: (B, 10) - scores for the 10 rank classes
     """
-    def __init__(self, in_channels=500, num_channels=256, num_blocks=20, num_classes=10):
+    # 減少通道數以降低模型容量，測試能否改善訓練與驗證的落差。
+    def __init__(self, in_channels=500, num_channels=128, num_blocks=8, num_classes=10):
         super().__init__()
         self.conv_in = nn.Conv2d(in_channels, num_channels, 3, padding=1)
-        self.bn_in = nn.BatchNorm2d(num_channels)
+        self.bn_in = nn.BatchNorm2d(num_channels,momentum=0.01)
         
         self.layers = nn.Sequential(
             *[ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
         self.conv_in2 = nn.Conv2d(num_channels, 6, kernel_size=1)
-        self.bn_in2 = nn.BatchNorm2d(6)
+        self.bn_in2 = nn.BatchNorm2d(6,momentum=0.01)
         self.fc = nn.Linear(6 * 19 * 19, 2 * 19 * 19)
         self.dropout = nn.Dropout(p=0.5)
         self.fc_2 = nn.Linear(2 * 19 * 19, num_classes)

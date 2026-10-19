@@ -15,7 +15,13 @@ from torch.utils.data import DataLoader
 
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
-
+'''
+10/19修改內容
+1. 修正 DataLoader 分片洗牌機制：shardshuffle改成1000確保分片不會照順序讀取；加入 detshuffle=shuffle確保每個Epoch讀取分片的順序都重新打亂
+2. 加入Learning Rate衰減的機制
+3. 拉長 BatchNorm2d 統計記憶範圍
+4. 加入分片存在檢查，略過重複特徵抽取
+'''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
     def __init__(self, filename="output_log.txt"):
@@ -55,7 +61,7 @@ PER_SHARD = 1000       # 每個 webdataset 分片的樣本數
 SEED = 42
 VAL_SIZE = 100_000     # 從訓練集切出來的驗證集大小
 
-BATCH_SIZE = 256
+BATCH_SIZE = 128
 LEARNING_RATE = 1e-3
 NUM_EPOCHS = 20
 NUM_CLASSES = len(LEVELS)
@@ -154,10 +160,13 @@ def extract_split(df_part, tag):
 
 
 # 一次性作業。分片產出後重跑訓練可以直接從下一節開始。
-t0 = time.time()
-extract_split(df_val, 'val')
-extract_split(df_train, 'train')
-print('完成，總耗時 %.1f 分' % ((time.time() - t0) / 60))
+if glob.glob(f'{FEAT_DIR}/train/*.tar.gz') and glob.glob(f'{FEAT_DIR}/val/*.tar.gz'):
+    print('偵測到分片已存在，跳過特徵抽取！')
+else:
+    t0 = time.time()
+    extract_split(df_val, 'val')
+    extract_split(df_train, 'train')
+    print('完成，總耗時 %.1f 分' % ((time.time() - t0) / 60))
 
 
 def decode_sample(sample):
@@ -167,7 +176,7 @@ def decode_sample(sample):
 
 
 def make_loader(shards, workers, shuffle):
-    ds = wds.WebDataset(shards, shardshuffle=1 if shuffle else 0)
+    ds = wds.WebDataset(shards, shardshuffle=1000 if shuffle else 0, detshuffle=shuffle)
     if shuffle:
         ds = ds.shuffle(1000)
     ds = ds.decode().map(decode_sample).batched(BATCH_SIZE, partial=True)
@@ -198,7 +207,8 @@ print('一個 batch:', _x.shape, _y[:8].tolist())
 
 
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE,weight_decay=1e-2)
+scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-5)
 criterion = torch.nn.CrossEntropyLoss()
 
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
@@ -272,7 +282,10 @@ for epoch in range(NUM_EPOCHS):
 
     train_acc = 100 * correct / total if total else 0.0
     val_loss, val_acc = validate(model, val_loader, criterion)
-    history.append({'epoch': epoch + 1, 'train_acc': train_acc, 'val_acc': val_acc})
+    current_lr = optimizer.param_groups[0]['lr']
+    scheduler.step()
+
+    history.append({'epoch': epoch + 1, 'train_acc': train_acc, 'val_acc': val_acc, 'lr':current_lr})
     print('Epoch %d/%d  train acc %.2f%%  |  val loss %.4f acc %.2f%%  |  %.1f 分'
           % (epoch + 1, NUM_EPOCHS, train_acc, val_loss, val_acc,
              (time.time() - t0) / 60), flush=True)
