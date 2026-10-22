@@ -16,11 +16,10 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/19修改內容
-1. 修正 DataLoader 分片洗牌機制：shardshuffle改成1000確保分片不會照順序讀取；加入 detshuffle=shuffle確保每個Epoch讀取分片的順序都重新打亂
-2. 加入Learning Rate衰減的機制
-3. 拉長 BatchNorm2d 統計記憶範圍
-4. 加入分片存在檢查，略過重複特徵抽取
+10/21修改內容
+1. 修改 network.py (GoRankResNet)：移除 156 萬參數的 Flatten 全連接層，改用 Global Avg Pool + Global Max Pool 拼接後接輕量分類頭 (參數量由 451 萬降至 298 萬)
+2. 訓練迴圈加入圍棋棋盤 8 重對稱隨機增強 (隨機左右翻轉 torch.flip + 隨機旋轉 0/90/180/270 度 torch.rot90)
+結果：過擬合完全消除 (Ep20 train acc 27.86% / val acc 27.18%)，最佳 val acc 提升至 27.19% (Ep19)，val loss 降至 1.8337；惟前中段 (Ep1~14) 驗證集仍有震盪現象
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -255,6 +254,7 @@ def validate(model, loader, criterion):
 history = []
 model.train()
 best_val_acc = 0.0
+train_start_time = time.time()
 
 for epoch in range(NUM_EPOCHS):
     t0 = time.time()
@@ -263,6 +263,13 @@ for epoch in range(NUM_EPOCHS):
     for inputs, labels, _ in train_loader:
         inputs = inputs.to(DEVICE, non_blocking=True)
         labels = labels.to(DEVICE, non_blocking=True)
+
+        # 圍棋棋盤 8 重對稱隨機增強（2種翻轉 × 4種旋轉 = 8種等價方向）
+        if torch.rand(1).item() < 0.5:
+            inputs = torch.flip(inputs, dims=[-1])
+        k = torch.randint(0, 4, (1,)).item()
+        if k > 0:
+            inputs = torch.rot90(inputs, k, dims=[-2, -1])
 
         optimizer.zero_grad(set_to_none=True)
         outputs = model(inputs)
@@ -284,11 +291,12 @@ for epoch in range(NUM_EPOCHS):
     val_loss, val_acc = validate(model, val_loader, criterion)
     current_lr = optimizer.param_groups[0]['lr']
     scheduler.step()
+    epoch_minutes = (time.time() - t0) / 60
 
-    history.append({'epoch': epoch + 1, 'train_acc': train_acc, 'val_acc': val_acc, 'lr':current_lr})
-    print('Epoch %d/%d  train acc %.2f%%  |  val loss %.4f acc %.2f%%  |  %.1f 分'
-          % (epoch + 1, NUM_EPOCHS, train_acc, val_loss, val_acc,
-             (time.time() - t0) / 60), flush=True)
+    history.append({'epoch': epoch + 1, 'train_acc': train_acc, 'val_acc': val_acc})
+    print('Epoch %d/%d  lr %.6f  |  train acc %.2f%%  |  val loss %.4f acc %.2f%%  |  %.1f 分'
+          % (epoch + 1, NUM_EPOCHS, current_lr, train_acc, val_loss, val_acc,
+             epoch_minutes), flush=True)
 
     if val_acc > best_val_acc:
         best_val_acc = val_acc
@@ -296,8 +304,10 @@ for epoch in range(NUM_EPOCHS):
         print('  新的最佳 val acc %.2f%% —— 已存 best_model.pth' % best_val_acc)
     torch.save(model.state_dict(), f'{CKPT_DIR}/epoch_%d.pth' % (epoch + 1))
 
+total_train_minutes = (time.time() - train_start_time) / 60
 pd.DataFrame(history).to_csv(f'{CKPT_DIR}/history.csv', index=False)
-print('訓練完成，最佳 val acc %.2f%%' % best_val_acc)
+print('訓練完成，總耗時 %.1f 分（%.2f 小時），最佳 val acc %.2f%%'
+      % (total_train_minutes, total_train_minutes / 60, best_val_acc))
 
 
 import matplotlib.pyplot as plt

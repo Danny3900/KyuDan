@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -22,7 +23,7 @@ class GoRankResNet(nn.Module):
     Input: (B, 500, 19, 19)
     Output: (B, 10) - scores for the 10 rank classes
     """
-    # 減少通道數以降低模型容量，測試能否改善訓練與驗證的落差。
+    # 減少通道數以降低模型容量，並改用 Global Pooling 取代 Flatten 大全連接層以消除空間過擬合。
     def __init__(self, in_channels=500, num_channels=128, num_blocks=8, num_classes=10):
         super().__init__()
         self.conv_in = nn.Conv2d(in_channels, num_channels, 3, padding=1)
@@ -31,20 +32,21 @@ class GoRankResNet(nn.Module):
         self.layers = nn.Sequential(
             *[ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
-        self.conv_in2 = nn.Conv2d(num_channels, 6, kernel_size=1)
-        self.bn_in2 = nn.BatchNorm2d(6,momentum=0.01)
-        self.fc = nn.Linear(6 * 19 * 19, 2 * 19 * 19)
-        self.dropout = nn.Dropout(p=0.5)
-        self.fc_2 = nn.Linear(2 * 19 * 19, num_classes)
+        self.head = nn.Sequential(
+            nn.Linear(num_channels * 2, 128),
+            nn.BatchNorm1d(128, momentum=0.01),
+            nn.ReLU(),
+            nn.Dropout(p=0.4),
+            nn.Linear(128, num_classes)
+        )
 
     def forward(self, x):
         out = F.relu(self.bn_in(self.conv_in(x))) # Initial block
         out = self.layers(out) # Residual blocks
-        out = F.relu(self.bn_in2(self.conv_in2(out))) 
-        out = out.view(out.size(0), -1) # Flatten
-        out = F.relu(self.fc(out))
-        out = self.dropout(out)  # Apply dropout before final layer
-        out = self.fc_2(out)
+        avg_pool = F.adaptive_avg_pool2d(out, (1, 1)).view(out.size(0), -1)
+        max_pool = F.adaptive_max_pool2d(out, (1, 1)).view(out.size(0), -1)
+        out = torch.cat([avg_pool, max_pool], dim=1)
+        out = self.head(out)
 
         return out
 
