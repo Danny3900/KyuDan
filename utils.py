@@ -51,25 +51,35 @@ class SGFParseRankPrediction:
                 board_states.append(self._prepare_board(board))
         return board_states
 
-    def _extract_features(self, board_states):
+    def _extract_features(self, board_states, color: str = 'B'):
         features = []
         while len(board_states) < self.history_length: # Pad with empty boards if board states are less than history_length
             board_states.insert(0, np.zeros((19, 19), dtype=np.int8))
         history_states = board_states[-self.history_length:] # Choose the last N states 
-        # N*2 features
+
+        is_black = str(color).strip().upper() == 'B'
+        my_val = 1 if is_black else -1
+        opp_val = -1 if is_black else 1
+
+        # N*2 features：偶數通道固定放「目標玩家」，奇數通道固定放「對手」
         for t in history_states:
-            features.append((t == 1).astype(np.float32)) # black moves
-            features.append((t == -1).astype(np.float32)) # white moves
+            features.append((t == my_val).astype(np.float32))  # target player moves
+            features.append((t == opp_val).astype(np.float32)) # opponent moves
+
+        # 第 501 個通道：目標玩家執黑填 1，執白填 0
+        color_plane = np.ones((19, 19), dtype=np.float32) if is_black else np.zeros((19, 19), dtype=np.float32)
+        features.append(color_plane)
 
         features = np.array(features)
         return features
 
-    def features_from_sgf_content(self, game_content: str):
+    def features_from_sgf_content(self, game_content: str, color: str = 'B'):
         """Parse SGF content and return a list of feature arrays for every move in the game.
         Args:
             game_content: str -- SGF file content as a string
+            color: str -- target player's stone color ('B' or 'W')
         Returns:
-            features_list: List[np.ndarray] -- each element is shape (1, history_length*2, 19, 19)
+            features_list: np.ndarray -- shape (history_length*2 + 1, 19, 19)
             error: Optional[Exception] -- exception if parsing failed, else None
         """
         try:
@@ -79,7 +89,7 @@ class SGFParseRankPrediction:
 
         board_states = self._extract_game_states(game)
         # Extract features within the history length
-        features_list = self._extract_features(board_states)
+        features_list = self._extract_features(board_states, color=color)
         # Convert to uint8 to save space
         # Later in training, convert back to float32
         return np.array(features_list, dtype=np.uint8), None

@@ -16,10 +16,15 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/21修改內容
-1. 修改 network.py (GoRankResNet)：移除 156 萬參數的 Flatten 全連接層，改用 Global Avg Pool + Global Max Pool 拼接後接輕量分類頭 (參數量由 451 萬降至 298 萬)
-2. 訓練迴圈加入圍棋棋盤 8 重對稱隨機增強 (隨機左右翻轉 torch.flip + 隨機旋轉 0/90/180/270 度 torch.rot90)
-結果：過擬合完全消除 (Ep20 train acc 27.86% / val acc 27.18%)，最佳 val acc 提升至 27.19% (Ep19)，val loss 降至 1.8337；惟前中段 (Ep1~14) 驗證集仍有震盪現象
+10/22修改內容（針對前中段驗證震盪與提升模型上限）
+1. rank-prediction.py：
+   - 加入梯度裁剪 clip_grad_norm_(max_norm=1.0)，防止單步極端梯度把模型推偏
+   - CrossEntropyLoss 加入 label_smoothing=0.05，防止模型過度自信並穩定梯度
+   - 日誌新增每輪 lr 顯示與總訓練時間統計
+2. network.py (GoRankResNet)：
+   - BatchNorm momentum 由 0.01 改為 0.05，改善前中段權重快速更新時的統計落後 (BatchNorm Lag)
+   - 殘差塊 num_blocks 由 8 加深為 12、分類頭 Dropout 由 0.4 放寬為 0.2 (參數量 4,158,986)，提升棋理特徵學習上限
+考量以上修正，Learning rate調整到7e-4、NUM_EPOCHS調整到30
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -61,8 +66,8 @@ SEED = 42
 VAL_SIZE = 100_000     # 從訓練集切出來的驗證集大小
 
 BATCH_SIZE = 128
-LEARNING_RATE = 1e-3
-NUM_EPOCHS = 20
+LEARNING_RATE = 7e-4
+NUM_EPOCHS = 30
 NUM_CLASSES = len(LEVELS)
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -208,11 +213,10 @@ print('一個 batch:', _x.shape, _y[:8].tolist())
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE,weight_decay=1e-2)
 scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-5)
-criterion = torch.nn.CrossEntropyLoss()
+criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
 
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
 print('batch %d | lr %s | epochs %d' % (BATCH_SIZE, LEARNING_RATE, NUM_EPOCHS))
-
 
 def validate(model, loader, criterion):
     model.eval()
@@ -275,6 +279,7 @@ for epoch in range(NUM_EPOCHS):
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         total_loss += loss.item()

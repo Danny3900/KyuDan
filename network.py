@@ -6,9 +6,9 @@ class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(channels,momentum=0.01)
+        self.bn1 = nn.BatchNorm2d(channels,momentum=0.05)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(channels,momentum=0.01)
+        self.bn2 = nn.BatchNorm2d(channels,momentum=0.05)
 
     def forward(self, x):
         residual = x
@@ -20,23 +20,23 @@ class ResidualBlock(nn.Module):
 class GoRankResNet(nn.Module):
     """
     A ResNet-based model for ranking Go positions.
-    Input: (B, 500, 19, 19)
+    Input: (B, 501, 19, 19)
     Output: (B, 10) - scores for the 10 rank classes
     """
     # 減少通道數以降低模型容量，並改用 Global Pooling 取代 Flatten 大全連接層以消除空間過擬合。
-    def __init__(self, in_channels=500, num_channels=128, num_blocks=8, num_classes=10):
+    def __init__(self, in_channels=501, num_channels=128, num_blocks=12, num_classes=10):
         super().__init__()
         self.conv_in = nn.Conv2d(in_channels, num_channels, 3, padding=1)
-        self.bn_in = nn.BatchNorm2d(num_channels,momentum=0.01)
+        self.bn_in = nn.BatchNorm2d(num_channels,momentum=0.05)
         
         self.layers = nn.Sequential(
             *[ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
         self.head = nn.Sequential(
             nn.Linear(num_channels * 2, 128),
-            nn.BatchNorm1d(128, momentum=0.01),
+            nn.BatchNorm1d(128, momentum=0.05),
             nn.ReLU(),
-            nn.Dropout(p=0.4),
+            nn.Dropout(p=0.2),
             nn.Linear(128, num_classes)
         )
 
