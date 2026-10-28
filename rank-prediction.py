@@ -16,15 +16,14 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/22修改內容（針對前中段驗證震盪與提升模型上限）
-1. rank-prediction.py：
-   - 加入梯度裁剪 clip_grad_norm_(max_norm=1.0)，防止單步極端梯度把模型推偏
-   - CrossEntropyLoss 加入 label_smoothing=0.05，防止模型過度自信並穩定梯度
-   - 日誌新增每輪 lr 顯示與總訓練時間統計
-2. network.py (GoRankResNet)：
-   - BatchNorm momentum 由 0.01 改為 0.05，改善前中段權重快速更新時的統計落後 (BatchNorm Lag)
-   - 殘差塊 num_blocks 由 8 加深為 12、分類頭 Dropout 由 0.4 放寬為 0.2 (參數量 4,158,986)，提升棋理特徵學習上限
-考量以上修正，Learning rate調整到7e-4、NUM_EPOCHS調整到30
+10/27修改內容（加入目標玩家執色 color 資訊）
+1. utils.py (SGFParseRankPrediction)：
+   - features_from_sgf_content 與 _extract_features 新增接收 color ('B' 或 'W')
+   - 偶數通道固定放「目標玩家棋子」、奇數通道固定放「對手棋子」，並新增第 501 個通道 (執黑填 1、執白填 0)，特徵形狀改為 (501, 19, 19)
+2. rank-prediction.py：
+   - extract_worker 與 predict 推論皆傳入對應的 color 欄位；若偵測到現有分片形狀與 (501, 19, 19) 不符則自動重抽分片
+3. network.py (GoRankResNet)：
+   - in_channels 由 500 改為 501 (參數量 4,160,138)
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -105,7 +104,7 @@ df.head(3)
 
 _parser = SGFParseRankPrediction()
 _demo = df.iloc[0]['sgf_content']
-_feat, _err = _parser.features_from_sgf_content(_demo)
+_feat, _err = _parser.features_from_sgf_content(_demo, df.iloc[0]['color'])
 print('一局棋的特徵形狀:', _feat.shape, _feat.dtype)
 
 
@@ -116,7 +115,7 @@ def extract_worker(df_part, pattern, wid):
     t0 = time.time()
     with wds.ShardWriter(pattern, maxcount=PER_SHARD, verbose=0) as sink:
         for _, row in df_part.iterrows():
-            feat, err = parser.features_from_sgf_content(row['sgf_content'])
+            feat, err = parser.features_from_sgf_content(row['sgf_content'], row['color'])
             if err is not None:
                 bad += 1
                 continue
@@ -140,6 +139,8 @@ def extract_split(df_part, tag):
     """跑完一個 split，並確認產出真的有內容。"""
     outdir = f'{FEAT_DIR}/{tag}'
     os.makedirs(outdir, exist_ok=True)
+    for old_f in glob.glob(f'{outdir}/*.tar.gz'):
+        os.remove(old_f)
 
     procs = []
     for i in range(NPROC):
@@ -163,10 +164,23 @@ def extract_split(df_part, tag):
         raise SystemExit('%s: 分片平均僅 %.0f bytes，判定為空分片' % (tag, avg))
 
 
-# 一次性作業。分片產出後重跑訓練可以直接從下一節開始。
-if glob.glob(f'{FEAT_DIR}/train/*.tar.gz') and glob.glob(f'{FEAT_DIR}/val/*.tar.gz'):
-    print('偵測到分片已存在，跳過特徵抽取！')
+def shards_match_expected_shape():
+    train_s = sorted(glob.glob(f'{FEAT_DIR}/train/*.tar.gz'))
+    val_s = sorted(glob.glob(f'{FEAT_DIR}/val/*.tar.gz'))
+    if not train_s or not val_s:
+        return False
+    try:
+        sample = next(iter(wds.WebDataset([val_s[0]], shardshuffle=False).decode()))
+        return sample['features.npy'].shape == _feat.shape
+    except Exception:
+        return False
+
+
+# 一次性作業。分片產出且特徵形狀相符時可直接跳過；若特徵通道數改變則自動重抽分片。
+if shards_match_expected_shape():
+    print('偵測到分片已存在且形狀相符 %s，跳過特徵抽取！' % (str(_feat.shape),))
 else:
+    print('開始抽取特徵分片（目標形狀 %s）...' % (str(_feat.shape),), flush=True)
     t0 = time.time()
     extract_split(df_val, 'val')
     extract_split(df_train, 'train')
@@ -338,9 +352,10 @@ GPU_BATCH = 64
 _infer_parser = SGFParseRankPrediction()
 
 
-def sgf_to_features(sgf_content):
-    """給 multiprocessing.Pool 用的頂層函式。"""
-    feat, err = _infer_parser.features_from_sgf_content(sgf_content)
+def sgf_to_features(args):
+    """給 multiprocessing.Pool 用的頂層函式，接收 (sgf_content, color)。"""
+    sgf_content, color = args
+    feat, err = _infer_parser.features_from_sgf_content(sgf_content, color)
     return None if err is not None else feat
 
 
@@ -358,10 +373,13 @@ def predict(weights_path, out_path):
             t0 = time.time()
 
             for idx, r in test.iterrows():
-                # num_games 之後的 sgf_ 欄位是空字串，要濾掉
-                sgfs = [r[c] for c in sgf_cols
-                        if pd.notna(r[c]) and str(r[c]).strip()]
-                feats = [f for f in pool.map(sgf_to_features, sgfs) if f is not None]
+                # num_games 之後的 sgf_ 欄位是空字串，要濾掉，並配對對應的 color_i
+                sgf_color_pairs = [
+                    (r[c], r[c.replace('sgf_', 'color_')])
+                    for c in sgf_cols
+                    if pd.notna(r[c]) and str(r[c]).strip()
+                ]
+                feats = [f for f in pool.map(sgf_to_features, sgf_color_pairs) if f is not None]
                 if not feats:
                     rows.append([r['question_id'], LEVELS[0]])
                     continue
