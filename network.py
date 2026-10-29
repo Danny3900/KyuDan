@@ -23,8 +23,8 @@ class GoRankResNet(nn.Module):
     Input: (B, 501, 19, 19)
     Output: (B, 10) - scores for the 10 rank classes
     """
-    # 減少通道數以降低模型容量，並改用 Global Pooling 取代 Flatten 大全連接層以消除空間過擬合。
-    def __init__(self, in_channels=501, num_channels=128, num_blocks=12, num_classes=10):
+    # 擴展模型容量為 256 通道 × 16 層殘差塊，並以 Global Pooling + 256 維分類頭防止空間過擬合。
+    def __init__(self, in_channels=501, num_channels=256, num_blocks=16, num_classes=10):
         super().__init__()
         self.conv_in = nn.Conv2d(in_channels, num_channels, 3, padding=1)
         self.bn_in = nn.BatchNorm2d(num_channels,momentum=0.05)
@@ -33,11 +33,11 @@ class GoRankResNet(nn.Module):
             *[ResidualBlock(num_channels) for _ in range(num_blocks)]
         )
         self.head = nn.Sequential(
-            nn.Linear(num_channels * 2, 128),
-            nn.BatchNorm1d(128, momentum=0.05),
+            nn.Linear(num_channels * 2, num_channels),
+            nn.BatchNorm1d(num_channels, momentum=0.05),
             nn.ReLU(),
             nn.Dropout(p=0.2),
-            nn.Linear(128, num_classes)
+            nn.Linear(num_channels, num_classes)
         )
 
     def forward(self, x):

@@ -16,14 +16,14 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/27修改內容（加入目標玩家執色 color 資訊）
-1. utils.py (SGFParseRankPrediction)：
-   - features_from_sgf_content 與 _extract_features 新增接收 color ('B' 或 'W')
-   - 偶數通道固定放「目標玩家棋子」、奇數通道固定放「對手棋子」，並新增第 501 個通道 (執黑填 1、執白填 0)，特徵形狀改為 (501, 19, 19)
+10/28修改內容（擴展模型容量、相鄰段位平滑、RTX 4090 bfloat16 加速）
+1. network.py (GoRankResNet)：
+   - 主幹擴展為 num_channels=256、num_blocks=16（參數量 20,188,426）
+   - 分類頭 self.head 中間層寬度由 128 同步擴展為 num_channels (512 -> 256 -> 10)
 2. rank-prediction.py：
-   - extract_worker 與 predict 推論皆傳入對應的 color 欄位；若偵測到現有分片形狀與 (501, 19, 19) 不符則自動重抽分片
-3. network.py (GoRankResNet)：
-   - in_channels 由 500 改為 501 (參數量 4,160,138)
+   - 新增 OrdinalLabelSmoothingLoss(smoothing=0.05)，將 5% 緩衝機率只分配給緊鄰的上下段位 (±1 級)，其餘不相鄰段位為 0%
+   - 配合較大模型將 LEARNING_RATE 調為 5e-4，維持 NUM_EPOCHS = 30
+   - 在訓練與驗證迴圈開啟 torch.amp.autocast('cuda', dtype=torch.bfloat16) 硬體加速
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -65,7 +65,7 @@ SEED = 42
 VAL_SIZE = 100_000     # 從訓練集切出來的驗證集大小
 
 BATCH_SIZE = 128
-LEARNING_RATE = 7e-4
+LEARNING_RATE = 5e-4
 NUM_EPOCHS = 30
 NUM_CLASSES = len(LEVELS)
 
@@ -224,10 +224,30 @@ _x, _y, _n = next(iter(val_loader))
 print('一個 batch:', _x.shape, _y[:8].tolist())
 
 
+class OrdinalLabelSmoothingLoss(torch.nn.Module):
+    """有序標籤平滑：將容錯機率只分配給左右相鄰 ±1 級（切合圍棋段位順序與競賽規則）。"""
+    def __init__(self, num_classes=10, smoothing=0.05):
+        super().__init__()
+        target_table = torch.zeros(num_classes, num_classes)
+        for i in range(num_classes):
+            target_table[i, i] = 1.0 - smoothing
+            if i == 0:
+                target_table[i, i + 1] = smoothing
+            elif i == num_classes - 1:
+                target_table[i, i - 1] = smoothing
+            else:
+                target_table[i, i - 1] = smoothing / 2.0
+                target_table[i, i + 1] = smoothing / 2.0
+        self.register_buffer('target_table', target_table)
+
+    def forward(self, outputs, labels):
+        return torch.nn.functional.cross_entropy(outputs, self.target_table[labels])
+
+
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE,weight_decay=1e-2)
 scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-5)
-criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
+criterion = OrdinalLabelSmoothingLoss(num_classes=NUM_CLASSES, smoothing=0.05).to(DEVICE)
 
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
 print('batch %d | lr %s | epochs %d' % (BATCH_SIZE, LEARNING_RATE, NUM_EPOCHS))
@@ -240,8 +260,10 @@ def validate(model, loader, criterion):
         for inputs, labels, _ in loader:
             inputs = inputs.to(DEVICE, non_blocking=True)
             labels = labels.to(DEVICE, non_blocking=True)
-            outputs = model(inputs)
-            loss_sum += criterion(outputs, labels).item()
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+            loss_sum += loss.item()
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
@@ -290,8 +312,9 @@ for epoch in range(NUM_EPOCHS):
             inputs = torch.rot90(inputs, k, dims=[-2, -1])
 
         optimizer.zero_grad(set_to_none=True)
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
+        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
