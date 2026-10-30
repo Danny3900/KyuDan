@@ -16,14 +16,18 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/28修改內容（擴展模型容量、相鄰段位平滑、RTX 4090 bfloat16 加速）
-1. network.py (GoRankResNet)：
-   - 主幹擴展為 num_channels=256、num_blocks=16（參數量 20,188,426）
-   - 分類頭 self.head 中間層寬度由 128 同步擴展為 num_channels (512 -> 256 -> 10)
-2. rank-prediction.py：
-   - 新增 OrdinalLabelSmoothingLoss(smoothing=0.05)，將 5% 緩衝機率只分配給緊鄰的上下段位 (±1 級)，其餘不相鄰段位為 0%
-   - 配合較大模型將 LEARNING_RATE 調為 5e-4，維持 NUM_EPOCHS = 30
-   - 在訓練與驗證迴圈開啟 torch.amp.autocast('cuda', dtype=torch.bfloat16) 硬體加速
+10/29修改內容（時序從第 1 手對齊與末端補零、3×3 九宮格區域池化、全世代 8 方向 TTA 驗證）
+1. utils.py (SGFParseRankPrediction)：
+   - _extract_game_states：跳過 SGF 空盤根節點 (move[0] is None)，嚴格從第 1 手開始取前 250 手 (滿 250 手即停止重播)
+   - _extract_features：不足 250 手時改於「末端補零 (Post-padding)」，確保所有棋局的開局與中盤通道固定對齊
+   - _prepare_board：改用 board.list_occupied_points() 加速盤面轉換
+2. network.py (GoRankResNet)：
+   - 新增 spatial_conv (1x1 Conv 64 通道) + spatial_pool (3x3 九宮格區域池化，濃縮四角、四邊、中腹為 576 維)
+   - 分類頭 self.head 輸入結合 全域平均 (256) + 全域最大 (256) + 九宮格區域特徵 (576) = 1088 維 (1088 -> 256 -> 10)
+3. rank-prediction.py：
+   - validate() 預設開啟 use_tta=True：每個 Epoch 驗證皆採用 8 方向旋轉翻轉平均 (TTA) 評估並挑選最佳模型
+   - predict() 測試集推論同步採用 8 方向旋轉翻轉平均 (TTA) + bfloat16 加速
+   - shards_match_expected_shape() 新增特徵內容比對，當 utils.py 抽取邏輯更新時自動重新抽取分片
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -171,7 +175,8 @@ def shards_match_expected_shape():
         return False
     try:
         sample = next(iter(wds.WebDataset([val_s[0]], shardshuffle=False).decode()))
-        return sample['features.npy'].shape == _feat.shape
+        val0_feat, _ = _parser.features_from_sgf_content(df_val.iloc[0]['sgf_content'], df_val.iloc[0]['color'])
+        return sample['features.npy'].shape == val0_feat.shape and np.array_equal(sample['features.npy'], val0_feat)
     except Exception:
         return False
 
@@ -252,7 +257,7 @@ criterion = OrdinalLabelSmoothingLoss(num_classes=NUM_CLASSES, smoothing=0.05).t
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
 print('batch %d | lr %s | epochs %d' % (BATCH_SIZE, LEARNING_RATE, NUM_EPOCHS))
 
-def validate(model, loader, criterion):
+def validate(model, loader, criterion, use_tta=True):
     model.eval()
     loss_sum, correct, total, batches = 0.0, 0, 0, 0
     all_labels, all_predictions = [], []
@@ -261,10 +266,23 @@ def validate(model, loader, criterion):
             inputs = inputs.to(DEVICE, non_blocking=True)
             labels = labels.to(DEVICE, non_blocking=True)
             with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                if not use_tta:
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    _, predicted = torch.max(outputs.data, 1)
+                else:
+                    probs_sum = 0.0
+                    loss_accum = 0.0
+                    for flip in (False, True):
+                        x_aug = torch.flip(inputs, dims=[-1]) if flip else inputs
+                        for k in range(4):
+                            x_rot = torch.rot90(x_aug, k, dims=[-2, -1]) if k > 0 else x_aug
+                            out = model(x_rot)
+                            loss_accum += criterion(out, labels).item()
+                            probs_sum = probs_sum + out.softmax(dim=1)
+                    loss = torch.tensor(loss_accum / 8.0)
+                    _, predicted = torch.max(probs_sum, 1)
             loss_sum += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             batches += 1
@@ -411,8 +429,15 @@ def predict(weights_path, out_path):
                 probs = []
                 with torch.no_grad():
                     for i in range(0, len(x), GPU_BATCH):
-                        out = net(x[i:i + GPU_BATCH].to(DEVICE))
-                        probs.append(out.softmax(1).cpu().numpy())
+                        bx = x[i:i + GPU_BATCH].to(DEVICE)
+                        probs_sum = 0.0
+                        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                            for flip in (False, True):
+                                x_aug = torch.flip(bx, dims=[-1]) if flip else bx
+                                for k in range(4):
+                                    x_rot = torch.rot90(x_aug, k, dims=[-2, -1]) if k > 0 else x_aug
+                                    probs_sum = probs_sum + net(x_rot).softmax(1)
+                        probs.append((probs_sum / 8.0).float().cpu().numpy())
 
                 avg = np.concatenate(probs).mean(0)      # 同題多局的機率平均
                 rows.append([r['question_id'], LEVELS[int(avg.argmax())]])

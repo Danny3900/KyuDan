@@ -17,16 +17,14 @@ class SGFParseRankPrediction:
         # number of previous board states to include in history
         self.history_length = history_length
 
-    def _prepare_board(self,board:sgfmill.boards.Board):
-        board_np = np.zeros((19,19), np.int8)
-        for x in range(19):
-            for y in range(19):
-                # sgfmill keeps rows from bottom to top, columns from left to right
-                player = board.get(x,y)
-                if player == 'b':
-                    board_np[y,x] = 1 # label black stones as 1 on the board
-                if player == 'w':
-                    board_np[y,x] = -1 # label white stones as -1 on the board
+    def _prepare_board(self, board: sgfmill.boards.Board):
+        board_np = np.zeros((19, 19), np.int8)
+        # 直接遍歷盤面上的有子點，座標定義與原版 board.get(x, y) -> board_np[y, x] 完全一致
+        for player, (x, y) in board.list_occupied_points():
+            if player == 'b':
+                board_np[y, x] = 1  # label black stones as 1 on the board
+            elif player == 'w':
+                board_np[y, x] = -1 # label white stones as -1 on the board
         return board_np
 
     def _extract_game_states(self, game):
@@ -35,27 +33,34 @@ class SGFParseRankPrediction:
         
         for node in game.get_main_sequence():
             move = node.get_move()
-            if move[0] is not None: # If there's a move (could be stone placement or pass)
-                color = move[0]
-                # Check if it's a pass move
-                # If move[1] is None, it's a pass, board state doesn't change
-                if move[1] is not None:
-                    # Place the stone on the board
-                    row = move[1][0]
-                    column = move[1][1]
-                    board.play(row, column, color)
-                # Record the board state after the move
-                board_states.append(self._prepare_board(board))
-            else: 
-                # If the board is empty (root node), player black starts first
-                board_states.append(self._prepare_board(board))
+            # 跳過 SGF 空盤根節點 (move[0] is None)，確保索引 0 嚴格對應第 1 手落子
+            if move[0] is None:
+                continue
+
+            color = move[0]
+            # Check if it's a pass move
+            # If move[1] is None, it's a pass, board state doesn't change
+            if move[1] is not None:
+                # Place the stone on the board
+                row = move[1][0]
+                column = move[1][1]
+                board.play(row, column, color)
+            # Record the board state after the move
+            board_states.append(self._prepare_board(board))
+
+            # 從第 1 手固定取前 history_length (250) 手，超過直接停止重播以節省時間
+            if len(board_states) >= self.history_length:
+                break
         return board_states
 
     def _extract_features(self, board_states, color: str = 'B'):
         features = []
-        while len(board_states) < self.history_length: # Pad with empty boards if board states are less than history_length
-            board_states.insert(0, np.zeros((19, 19), dtype=np.int8))
-        history_states = board_states[-self.history_length:] # Choose the last N states 
+        # 不足 250 手時改於末端補零 (Post-padding)，確保所有棋局從第 1 手固定對齊在最前面通道
+        if len(board_states) < self.history_length:
+            pad_count = self.history_length - len(board_states)
+            history_states = board_states + [np.zeros((19, 19), dtype=np.int8) for _ in range(pad_count)]
+        else:
+            history_states = board_states[:self.history_length]
 
         is_black = str(color).strip().upper() == 'B'
         my_val = 1 if is_black else -1
