@@ -16,18 +16,16 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/29修改內容（時序從第 1 手對齊與末端補零、3×3 九宮格區域池化、全世代 8 方向 TTA 驗證）
-1. utils.py (SGFParseRankPrediction)：
-   - _extract_game_states：跳過 SGF 空盤根節點 (move[0] is None)，嚴格從第 1 手開始取前 250 手 (滿 250 手即停止重播)
-   - _extract_features：不足 250 手時改於「末端補零 (Post-padding)」，確保所有棋局的開局與中盤通道固定對齊
-   - _prepare_board：改用 board.list_occupied_points() 加速盤面轉換
-2. network.py (GoRankResNet)：
-   - 新增 spatial_conv (1x1 Conv 64 通道) + spatial_pool (3x3 九宮格區域池化，濃縮四角、四邊、中腹為 576 維)
-   - 分類頭 self.head 輸入結合 全域平均 (256) + 全域最大 (256) + 九宮格區域特徵 (576) = 1088 維 (1088 -> 256 -> 10)
-3. rank-prediction.py：
-   - validate() 預設開啟 use_tta=True：每個 Epoch 驗證皆採用 8 方向旋轉翻轉平均 (TTA) 評估並挑選最佳模型
-   - predict() 測試集推論同步採用 8 方向旋轉翻轉平均 (TTA) + bfloat16 加速
-   - shards_match_expected_shape() 新增特徵內容比對，當 utils.py 抽取邏輯更新時自動重新抽取分片
+10/30修改內容與訓練成果（學習率提升至 1e-3 搭配 2 輪 Linear Warmup + Cosine Annealing 排程）
+1. rank-prediction.py 修改：
+   - LEARNING_RATE 由 5e-4 提升至 1e-3，解決後段學習率過早衰減、模型尚未完全收斂即停止的問題
+   - 新增 WARMUP_EPOCHS = 2，透過 SequentialLR 串接 LinearLR (前 2 輪由 3e-4 線性暖身至 1e-3) 與 CosineAnnealingLR (第 3~30 輪由 1e-3 餘弦衰減至 1e-5)
+2. 訓練結果（30 Epochs，總耗時 295.2 分 / 4.92 小時）：
+   - 最高 train acc：37.28% (較 10/29 第一階段的 34.48% 提升 +2.80%)
+   - 最佳 val acc (8 方向 TTA)：35.80% (35,803/100,000，於 Epoch 29 達成，val loss 降至 1.7137；較 10/29 的 33.61% 提升 +2.20%)
+   - 誤差 ±1 級內準確度 (Within ±1 Rank)：66.76% (完全命中 35.80% + 相鄰一級 30.96%)，單局 AICUP 官方換算分達 0.4719
+   - 各段位準確率 (Epoch 29 best_model.pth)：
+     D: 62.92%, C: 35.82%, B: 29.84%, A: 23.72%, 1D: 31.52%, 2D: 22.75% (Ep25 最高達 25.05%), 3D: 26.65%, 4D: 28.16%, 5D: 34.81%, 6D: 61.84% (中間 8 段 C~5D 平均達 29.16%)
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -69,7 +67,8 @@ SEED = 42
 VAL_SIZE = 100_000     # 從訓練集切出來的驗證集大小
 
 BATCH_SIZE = 128
-LEARNING_RATE = 5e-4
+LEARNING_RATE = 1e-3
+WARMUP_EPOCHS = 2
 NUM_EPOCHS = 30
 NUM_CLASSES = len(LEVELS)
 
@@ -250,12 +249,20 @@ class OrdinalLabelSmoothingLoss(torch.nn.Module):
 
 
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE,weight_decay=1e-2)
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-5)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-2)
+warmup_scheduler = optim.lr_scheduler.LinearLR(
+    optimizer, start_factor=0.3, end_factor=1.0, total_iters=WARMUP_EPOCHS
+)
+cosine_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    optimizer, T_max=NUM_EPOCHS - WARMUP_EPOCHS, eta_min=1e-5
+)
+scheduler = optim.lr_scheduler.SequentialLR(
+    optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[WARMUP_EPOCHS]
+)
 criterion = OrdinalLabelSmoothingLoss(num_classes=NUM_CLASSES, smoothing=0.05).to(DEVICE)
 
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
-print('batch %d | lr %s | epochs %d' % (BATCH_SIZE, LEARNING_RATE, NUM_EPOCHS))
+print('batch %d | lr %s (warmup %d ep) | epochs %d' % (BATCH_SIZE, LEARNING_RATE, WARMUP_EPOCHS, NUM_EPOCHS))
 
 def validate(model, loader, criterion, use_tta=True):
     model.eval()
