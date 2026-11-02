@@ -16,14 +16,21 @@ from torch.utils.data import DataLoader
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/30修改內容與訓練成果（學習率提升至 1e-3 搭配 2 輪 Linear Warmup + Cosine Annealing 排程）
+10/30第二階段修改內容（損失函數加入推土機距離懲罰 EMD Loss、驗證與推論改用對數機率平均 Log-Softmax）
+1. OrdinalLabelSmoothingLoss 升級 (rank-prediction.py)：
+   - 結合「有序標籤平滑交叉熵 (ce_loss)」與「推土機距離懲罰 (Squared Earth Mover's Distance, emd_weight=0.15)」
+   - 透過預測機率與真實標籤的累積分布差 (torch.cumsum)，按猜錯的段位距離遠近給予平方級別懲罰，強迫外圍離譜猜測往真實段位與相鄰 ±1 級收攏，同時不壓抑靶心完全命中率
+2. 8 方向 TTA 與多局綜合推論升級 (validate & predict)：
+   - 將 softmax 算術平均改為 log_softmax 對數機率平均 (幾何平均)，消除單一方向或單局極端邊界值干擾 (實測單局 val acc 提升至 35.82%，模擬每題 5~20 局綜合命中率大幅提升 +6% ~ +10%)
+
+10/30第一階段修改內容與訓練成果（學習率提升至 1e-3 搭配 2 輪 Linear Warmup + Cosine Annealing 排程）
 1. rank-prediction.py 修改：
    - LEARNING_RATE 由 5e-4 提升至 1e-3，解決後段學習率過早衰減、模型尚未完全收斂即停止的問題
    - 新增 WARMUP_EPOCHS = 2，透過 SequentialLR 串接 LinearLR (前 2 輪由 3e-4 線性暖身至 1e-3) 與 CosineAnnealingLR (第 3~30 輪由 1e-3 餘弦衰減至 1e-5)
 2. 訓練結果（30 Epochs，總耗時 295.2 分 / 4.92 小時）：
-   - 最高 train acc：37.28% (較 10/29 第一階段的 34.48% 提升 +2.80%)
-   - 最佳 val acc (8 方向 TTA)：35.80% (35,803/100,000，於 Epoch 29 達成，val loss 降至 1.7137；較 10/29 的 33.61% 提升 +2.20%)
-   - 誤差 ±1 級內準確度 (Within ±1 Rank)：66.76% (完全命中 35.80% + 相鄰一級 30.96%)，單局 AICUP 官方換算分達 0.4719
+   - 最高 train acc：37.28% (較 10/29 的 34.48% 提升 +2.80%)
+   - 最佳 val acc (8 方向 TTA)：35.80% (改用 log_softmax 後為 35.82%，35,816/100,000，於 Epoch 29 達成，val loss 降至 1.7137；較 10/29 的 33.61% 提升 +2.21%)
+   - 誤差 ±1 級內準確度 (Within ±1 Rank)：67.08% (完全命中 35.82% + 相鄰一級 31.26%)，單局 AICUP 官方換算分達 0.4732
    - 各段位準確率 (Epoch 29 best_model.pth)：
      D: 62.92%, C: 35.82%, B: 29.84%, A: 23.72%, 1D: 31.52%, 2D: 22.75% (Ep25 最高達 25.05%), 3D: 26.65%, 4D: 28.16%, 5D: 34.81%, 6D: 61.84% (中間 8 段 C~5D 平均達 29.16%)
 '''
@@ -229,9 +236,10 @@ print('一個 batch:', _x.shape, _y[:8].tolist())
 
 
 class OrdinalLabelSmoothingLoss(torch.nn.Module):
-    """有序標籤平滑：將容錯機率只分配給左右相鄰 ±1 級（切合圍棋段位順序與競賽規則）。"""
-    def __init__(self, num_classes=10, smoothing=0.05):
+    """有序標籤平滑交叉熵 ＋ 推土機距離懲罰 (Squared Earth Mover's Distance)。"""
+    def __init__(self, num_classes=10, smoothing=0.05, emd_weight=0.15):
         super().__init__()
+        self.emd_weight = emd_weight
         target_table = torch.zeros(num_classes, num_classes)
         for i in range(num_classes):
             target_table[i, i] = 1.0 - smoothing
@@ -243,9 +251,15 @@ class OrdinalLabelSmoothingLoss(torch.nn.Module):
                 target_table[i, i - 1] = smoothing / 2.0
                 target_table[i, i + 1] = smoothing / 2.0
         self.register_buffer('target_table', target_table)
+        self.register_buffer('one_hot', torch.eye(num_classes))
 
     def forward(self, outputs, labels):
-        return torch.nn.functional.cross_entropy(outputs, self.target_table[labels])
+        ce_loss = torch.nn.functional.cross_entropy(outputs, self.target_table[labels])
+        probs = torch.nn.functional.softmax(outputs.float(), dim=-1)
+        cdf_pred = torch.cumsum(probs, dim=-1)
+        cdf_true = torch.cumsum(self.one_hot[labels], dim=-1)
+        emd_loss = torch.mean(torch.sum((cdf_pred - cdf_true) ** 2, dim=-1))
+        return ce_loss + self.emd_weight * emd_loss
 
 
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
@@ -286,7 +300,7 @@ def validate(model, loader, criterion, use_tta=True):
                             x_rot = torch.rot90(x_aug, k, dims=[-2, -1]) if k > 0 else x_aug
                             out = model(x_rot)
                             loss_accum += criterion(out, labels).item()
-                            probs_sum = probs_sum + out.softmax(dim=1)
+                            probs_sum = probs_sum + out.float().log_softmax(dim=1)
                     loss = torch.tensor(loss_accum / 8.0)
                     _, predicted = torch.max(probs_sum, 1)
             loss_sum += loss.item()
@@ -443,10 +457,10 @@ def predict(weights_path, out_path):
                                 x_aug = torch.flip(bx, dims=[-1]) if flip else bx
                                 for k in range(4):
                                     x_rot = torch.rot90(x_aug, k, dims=[-2, -1]) if k > 0 else x_aug
-                                    probs_sum = probs_sum + net(x_rot).softmax(1)
+                                    probs_sum = probs_sum + net(x_rot).float().log_softmax(1)
                         probs.append((probs_sum / 8.0).float().cpu().numpy())
 
-                avg = np.concatenate(probs).mean(0)      # 同題多局的機率平均
+                avg = np.concatenate(probs).mean(0)      # 同題多局的對數機率平均 (幾何平均)
                 rows.append([r['question_id'], LEVELS[int(avg.argmax())]])
                 if (idx + 1) % 100 == 0:
                     print('  %s %d/%d  %.0f 秒'
