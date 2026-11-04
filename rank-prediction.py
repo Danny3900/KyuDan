@@ -1,10 +1,11 @@
 import sys
+import copy
 import glob
+import math
 import os
 import time
+from collections import defaultdict
 from multiprocessing import Pool, Process
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix
 
 import numpy as np
 import pandas as pd
@@ -13,26 +14,24 @@ import torch.optim as optim
 import webdataset as wds
 from torch.utils.data import DataLoader
 
+from sklearn.model_selection import train_test_split
+
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-10/30第二階段修改內容（損失函數加入推土機距離懲罰 EMD Loss、驗證與推論改用對數機率平均 Log-Softmax）
-1. OrdinalLabelSmoothingLoss 升級 (rank-prediction.py)：
-   - 結合「有序標籤平滑交叉熵 (ce_loss)」與「推土機距離懲罰 (Squared Earth Mover's Distance, emd_weight=0.15)」
-   - 透過預測機率與真實標籤的累積分布差 (torch.cumsum)，按猜錯的段位距離遠近給予平方級別懲罰，強迫外圍離譜猜測往真實段位與相鄰 ±1 級收攏，同時不壓抑靶心完全命中率
-2. 8 方向 TTA 與多局綜合推論升級 (validate & predict)：
-   - 將 softmax 算術平均改為 log_softmax 對數機率平均 (幾何平均)，消除單一方向或單局極端邊界值干擾 (實測單局 val acc 提升至 35.82%，模擬每題 5~20 局綜合命中率大幅提升 +6% ~ +10%)
+11/03修改內容（移除 500 層稀疏提死子特徵，改於 GPU 即時推導 60 層關鍵時期氣數快照 ＋ 2 層棋盤邊界線，共 1063 通道）
+1. 修改原因與問題診斷：
+   - 11/02 整合版 (1501 通道) 實測成果：train acc 41.65%、最佳 val(EMA) acc 37.81% (Ep30)、中間 8 段平均 32.26% (2D 達 26.41% 歷史新高)、
+     差一階以內 (Within ±1 Rank) 達 69.35% (69,352/100,000)、單盤 AICUP 官方分數達 0.4942 (全面超越組員 softmax 版的 31.84% / 68.86% / 0.4928)。
+   - 後段輕微過擬合診斷：val(EMA) loss 於 Ep24 觸底 (1.6769) 後微幅反彈至 Ep30 (1.6851)。主因之一為 500 層逐手提死子 (dead_captures) 超過 98% 為 0（極度稀疏），
+     佔用第一層約 115 萬個參數，易記憶訓練集特定手數之提子特例；且無法反映棋子被提掉前的叫吃與對殺氣緊狀態。
+2. 具體修改：
+   - network.py: 移除 500 層稀疏的 dead_captures，保留 500 層逐手新落子 (new_moves)；
+   - 新增 GPU 即時連通塊氣數計算 (_compute_snapshot_liberty_planes)：於第 25, 50, ..., 250 手 (共 10 個時期) 計算雙方棋塊之
+     「1 氣 (叫吃)、2 氣 (氣緊)、>=3 氣 (安定)」共 60 通道；
+   - 新增棋盤空間邊界線特徵 (border_planes)：一二線邊界層 + 三四線定石層共 2 通道；
+   - 總輸入通道由 1501 精簡為 1063 (501 原始 + 500 新落子 + 60 氣數快照 + 2 邊界線)，免重抽磁碟分片 (.tar.gz)。
 
-10/30第一階段修改內容與訓練成果（學習率提升至 1e-3 搭配 2 輪 Linear Warmup + Cosine Annealing 排程）
-1. rank-prediction.py 修改：
-   - LEARNING_RATE 由 5e-4 提升至 1e-3，解決後段學習率過早衰減、模型尚未完全收斂即停止的問題
-   - 新增 WARMUP_EPOCHS = 2，透過 SequentialLR 串接 LinearLR (前 2 輪由 3e-4 線性暖身至 1e-3) 與 CosineAnnealingLR (第 3~30 輪由 1e-3 餘弦衰減至 1e-5)
-2. 訓練結果（30 Epochs，總耗時 295.2 分 / 4.92 小時）：
-   - 最高 train acc：37.28% (較 10/29 的 34.48% 提升 +2.80%)
-   - 最佳 val acc (8 方向 TTA)：35.80% (改用 log_softmax 後為 35.82%，35,816/100,000，於 Epoch 29 達成，val loss 降至 1.7137；較 10/29 的 33.61% 提升 +2.21%)
-   - 誤差 ±1 級內準確度 (Within ±1 Rank)：67.08% (完全命中 35.82% + 相鄰一級 31.26%)，單局 AICUP 官方換算分達 0.4732
-   - 各段位準確率 (Epoch 29 best_model.pth)：
-     D: 62.92%, C: 35.82%, B: 29.84%, A: 23.72%, 1D: 31.52%, 2D: 22.75% (Ep25 最高達 25.05%), 3D: 26.65%, 4D: 28.16%, 5D: 34.81%, 6D: 61.84% (中間 8 段 C~5D 平均達 29.16%)
 '''
 # --- 加入日誌記錄功能 ---
 class Logger(object):
@@ -77,9 +76,12 @@ BATCH_SIZE = 128
 LEARNING_RATE = 1e-3
 WARMUP_EPOCHS = 2
 NUM_EPOCHS = 30
+EMA_DECAY = 0.9995
 NUM_CLASSES = len(LEVELS)
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
 
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -236,10 +238,9 @@ print('一個 batch:', _x.shape, _y[:8].tolist())
 
 
 class OrdinalLabelSmoothingLoss(torch.nn.Module):
-    """有序標籤平滑交叉熵 ＋ 推土機距離懲罰 (Squared Earth Mover's Distance)。"""
-    def __init__(self, num_classes=10, smoothing=0.05, emd_weight=0.15):
+    """有序標籤平滑：將容錯機率只分配給左右相鄰 ±1 級（切合圍棋段位順序與競賽規則）。"""
+    def __init__(self, num_classes=10, smoothing=0.05):
         super().__init__()
-        self.emd_weight = emd_weight
         target_table = torch.zeros(num_classes, num_classes)
         for i in range(num_classes):
             target_table[i, i] = 1.0 - smoothing
@@ -251,18 +252,56 @@ class OrdinalLabelSmoothingLoss(torch.nn.Module):
                 target_table[i, i - 1] = smoothing / 2.0
                 target_table[i, i + 1] = smoothing / 2.0
         self.register_buffer('target_table', target_table)
-        self.register_buffer('one_hot', torch.eye(num_classes))
 
     def forward(self, outputs, labels):
-        ce_loss = torch.nn.functional.cross_entropy(outputs, self.target_table[labels])
-        probs = torch.nn.functional.softmax(outputs.float(), dim=-1)
-        cdf_pred = torch.cumsum(probs, dim=-1)
-        cdf_true = torch.cumsum(self.one_hot[labels], dim=-1)
-        emd_loss = torch.mean(torch.sum((cdf_pred - cdf_true) ** 2, dim=-1))
-        return ce_loss + self.emd_weight * emd_loss
+        return torch.nn.functional.cross_entropy(outputs, self.target_table[labels])
+
+
+class ModelEMA:
+    """
+    模型權重指數移動平均 (Exponential Moving Average)：
+    平滑 mini-batch 梯度震盪與 BatchNorm 統計量漂移，搭配動態暖身衰減率避免初期未收斂權重殘留。
+    """
+    def __init__(self, model, decay=0.9995):
+        self.module = copy.deepcopy(model).eval()
+        for p in self.module.parameters():
+            p.requires_grad_(False)
+        self.decay = decay
+        self.updates = 0
+
+        # 預先按 (device, dtype) 分組綁定浮點數參數/BN統計量與整數計數器參照，實現單一融合核心高速更新
+        ema_tensors = list(self.module.parameters()) + list(self.module.buffers())
+        src_tensors = list(model.parameters()) + list(model.buffers())
+        groups = defaultdict(lambda: ([], []))
+        self._ema_nonfloat, self._src_nonfloat = [], []
+        for e_t, s_t in zip(ema_tensors, src_tensors):
+            if e_t.is_floating_point():
+                groups[(e_t.device, e_t.dtype)][0].append(e_t)
+                groups[(e_t.device, e_t.dtype)][1].append(s_t)
+            else:
+                self._ema_nonfloat.append(e_t)
+                self._src_nonfloat.append(s_t)
+        self._float_groups = list(groups.values())
+
+    @torch.no_grad()
+    def update(self, model):
+        self.updates += 1
+        # 動態暖身衰減率：初期快速跟隨最新權重，隨步數推進平滑收斂至目標 decay (0.9995)
+        d = self.decay * (1.0 - math.exp(-self.updates / 2000.0))
+        weight = 1.0 - d
+        if hasattr(torch, '_foreach_lerp_'):
+            for ema_list, src_list in self._float_groups:
+                torch._foreach_lerp_(ema_list, src_list, weight)
+        else:
+            for ema_list, src_list in self._float_groups:
+                for e_t, s_t in zip(ema_list, src_list):
+                    e_t.lerp_(s_t, weight)
+        for e_t, s_t in zip(self._ema_nonfloat, self._src_nonfloat):
+            e_t.copy_(s_t)
 
 
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
+ema_model = ModelEMA(model, decay=EMA_DECAY)
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-2)
 warmup_scheduler = optim.lr_scheduler.LinearLR(
     optimizer, start_factor=0.3, end_factor=1.0, total_iters=WARMUP_EPOCHS
@@ -276,12 +315,15 @@ scheduler = optim.lr_scheduler.SequentialLR(
 criterion = OrdinalLabelSmoothingLoss(num_classes=NUM_CLASSES, smoothing=0.05).to(DEVICE)
 
 print('參數量 {:,}'.format(sum(p.numel() for p in model.parameters())))
-print('batch %d | lr %s (warmup %d ep) | epochs %d' % (BATCH_SIZE, LEARNING_RATE, WARMUP_EPOCHS, NUM_EPOCHS))
+print('batch %d | lr %s (warmup %d ep) | ema %.4f | epochs %d'
+      % (BATCH_SIZE, LEARNING_RATE, WARMUP_EPOCHS, EMA_DECAY, NUM_EPOCHS))
+
 
 def validate(model, loader, criterion, use_tta=True):
+    was_training = model.training
     model.eval()
     loss_sum, correct, total, batches = 0.0, 0, 0, 0
-    all_labels, all_predictions = [], []
+    cm = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
     with torch.no_grad():
         for inputs, labels, _ in loader:
             inputs = inputs.to(DEVICE, non_blocking=True)
@@ -307,32 +349,25 @@ def validate(model, loader, criterion, use_tta=True):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             batches += 1
-            all_labels.extend(labels.cpu().tolist())
-            all_predictions.extend(predicted.cpu().tolist())
-    model.train()
 
-    cm = confusion_matrix(
-        all_labels,
-        all_predictions,
-        labels=list(range(NUM_CLASSES)),
-    )
-    print('各段位準確率：')
-    for i, rank in enumerate(LEVELS):
-        rank_total = cm[i].sum()
-        rank_acc = cm[i, i] / rank_total if rank_total else 0.0
-        print('  %s: %.2f%% (%d/%d)' %
-              (rank, 100 * rank_acc, cm[i, i], rank_total))
-    print('混淆矩陣（列=實際段位，欄=預測段位；順序=%s）:' % LEVELS)
-    print(cm)
+            # 累加混淆矩陣 (列=真實標籤, 欄=預測標籤)，不在每輪結束時印出
+            y_true = labels.cpu().numpy()
+            y_pred = predicted.cpu().numpy()
+            np.add.at(cm, (y_true, y_pred), 1)
+    if was_training:
+        model.train()
 
     return (loss_sum / batches if batches else 0.0,
-            100 * correct / total if total else 0.0)
+            100 * correct / total if total else 0.0,
+            cm)
 
 
 # 訓練期間不能中斷 kernel。
 history = []
+comp_history = []
 model.train()
 best_val_acc = 0.0
+best_cm = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
 train_start_time = time.time()
 
 for epoch in range(NUM_EPOCHS):
@@ -343,7 +378,7 @@ for epoch in range(NUM_EPOCHS):
         inputs = inputs.to(DEVICE, non_blocking=True)
         labels = labels.to(DEVICE, non_blocking=True)
 
-        # 圍棋棋盤 8 重對稱隨機增強（2種翻轉 × 4種旋轉 = 8種等價方向）
+        # 圍棋棋盤 8 重對稱隨機增強（2種翻轉 × 4種旋轉 = 8種等價方向，於 GPU 整批高速運算）
         if torch.rand(1).item() < 0.5:
             inputs = torch.flip(inputs, dims=[-1])
         k = torch.randint(0, 4, (1,)).item()
@@ -357,6 +392,7 @@ for epoch in range(NUM_EPOCHS):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        ema_model.update(model)
 
         total_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
@@ -368,27 +404,82 @@ for epoch in range(NUM_EPOCHS):
                   % (epoch + 1, steps, total_loss / steps,
                      100 * correct / total, (time.time() - t0) / 60), flush=True)
 
+    train_loss = total_loss / steps if steps else 0.0
     train_acc = 100 * correct / total if total else 0.0
-    val_loss, val_acc = validate(model, val_loader, criterion)
+    # 驗證與模型儲存統一採用平滑後的 EMA 模型權重
+    val_loss, val_acc, val_cm = validate(ema_model.module, val_loader, criterion)
     current_lr = optimizer.param_groups[0]['lr']
     scheduler.step()
     epoch_minutes = (time.time() - t0) / 60
 
     history.append({'epoch': epoch + 1, 'train_acc': train_acc, 'val_acc': val_acc})
-    print('Epoch %d/%d  lr %.6f  |  train acc %.2f%%  |  val loss %.4f acc %.2f%%  |  %.1f 分'
-          % (epoch + 1, NUM_EPOCHS, current_lr, train_acc, val_loss, val_acc,
+    val_total_samples = max(int(val_cm.sum()), 1)
+    val_off1_acc = 100.0 * (np.trace(val_cm, offset=1) + np.trace(val_cm, offset=-1)) / val_total_samples
+    val_within1_acc = val_acc + val_off1_acc
+    val_comp_score = val_acc + val_off1_acc * math.exp(-1.0)
+    val_row_sum = val_cm.sum(axis=1)
+    val_recall_pct = np.divide(
+        np.diag(val_cm), val_row_sum,
+        out=np.zeros(NUM_CLASSES, dtype=np.float64), where=val_row_sum > 0
+    ) * 100.0
+    val_mid8_acc = float(val_recall_pct[1:9].mean())
+    comp_history.append({
+        'epoch': epoch + 1,
+        'exact_acc': val_acc,
+        'off1_acc': val_off1_acc,
+        'within1_acc': val_within1_acc,
+        'comp_score': val_comp_score,
+        'mid8_acc': val_mid8_acc,
+    })
+    print('Epoch %d/%d  lr %.6f  |  train loss %.4f acc %.2f%%  |  val(EMA) loss %.4f acc %.2f%%  |  %.1f 分'
+          % (epoch + 1, NUM_EPOCHS, current_lr, train_loss, train_acc, val_loss, val_acc,
              epoch_minutes), flush=True)
 
     if val_acc > best_val_acc:
         best_val_acc = val_acc
-        torch.save(model.state_dict(), f'{CKPT_DIR}/best_model.pth')
-        print('  新的最佳 val acc %.2f%% —— 已存 best_model.pth' % best_val_acc)
-    torch.save(model.state_dict(), f'{CKPT_DIR}/epoch_%d.pth' % (epoch + 1))
+        best_cm = val_cm.copy()
+        torch.save(ema_model.module.state_dict(), f'{CKPT_DIR}/best_model.pth')
+        print('  新的最佳 val(EMA) acc %.2f%% —— 已存 best_model.pth' % best_val_acc)
+    torch.save(ema_model.module.state_dict(), f'{CKPT_DIR}/epoch_%d.pth' % (epoch + 1))
 
 total_train_minutes = (time.time() - train_start_time) / 60
 pd.DataFrame(history).to_csv(f'{CKPT_DIR}/history.csv', index=False)
-print('訓練完成，總耗時 %.1f 分（%.2f 小時），最佳 val acc %.2f%%'
+print('\n' + '=' * 60)
+print('訓練完成，總耗時 %.1f 分（%.2f 小時），最佳 val acc: %.2f%%'
       % (total_train_minutes, total_train_minutes / 60, best_val_acc))
+
+# --- 於訓練全部結束後，一次性輸出最佳模型的各等級分類指標與混淆矩陣 ---
+tp = np.diag(best_cm)
+pred_sum = best_cm.sum(axis=0)   # 每個類別被預測的總數 (Column sum)
+true_sum = best_cm.sum(axis=1)   # 每個類別的真實樣本數 (Row sum)
+
+precision_per_class = np.divide(tp, pred_sum, out=np.zeros_like(tp, dtype=np.float64), where=pred_sum > 0)
+recall_per_class = np.divide(tp, true_sum, out=np.zeros_like(tp, dtype=np.float64), where=true_sum > 0)
+f1_per_class = np.divide(
+    2 * precision_per_class * recall_per_class,
+    precision_per_class + recall_per_class,
+    out=np.zeros_like(tp, dtype=np.float64),
+    where=(precision_per_class + recall_per_class) > 0
+)
+
+metrics_df = pd.DataFrame({
+    'Rank': LEVELS,
+    'Precision (%)': np.round(precision_per_class * 100, 2),
+    'Recall (%)': np.round(recall_per_class * 100, 2),
+    'F1-score (%)': np.round(f1_per_class * 100, 2),
+    'Support': true_sum
+})
+print('\n【各棋力等級分類指標】')
+print(metrics_df.to_string(index=False))
+
+cm_df = pd.DataFrame(
+    best_cm,
+    index=[f'True_{lv}' for lv in LEVELS],
+    columns=[f'Pred_{lv}' for lv in LEVELS]
+)
+print('\n【混淆矩陣 (Confusion Matrix)】(列=真實等級, 欄=預測等級)')
+print(cm_df.to_string())
+print('=' * 60 + '\n')
 
 
 import matplotlib.pyplot as plt
@@ -405,10 +496,78 @@ plt.annotate('best %.2f%%' % best['val_acc'],
              xytext=(best['epoch'] + 1.5, best['val_acc'] - 4),
              arrowprops=dict(arrowstyle='->', color='gray'))
 plt.xlabel('epoch'); plt.ylabel('accuracy (%)')
-plt.legend(); plt.grid(alpha=.3); plt.tight_layout(); 
-plt.savefig('training_curve.png') # 將圖片儲存下來
+plt.legend(); plt.grid(alpha=.3); plt.tight_layout()
+plt.savefig('training_curve.png')
+plt.close()
 print("訓練曲線已儲存為 training_curve.png")
-# plt.show() # 如果要在無 UI 環境執行，建議註解掉 show()
+
+# --- 生成各棋力等級預測準確度折線圖 (rank_accuracy_curve.png) ---
+rank_acc = recall_per_class * 100       # 各等級預測準確率 (Recall)
+rank_prec = precision_per_class * 100   # 各等級精確率
+rank_f1 = f1_per_class * 100            # 各等級 F1-score
+
+plt.figure(figsize=(10, 5))
+plt.plot(LEVELS, rank_acc, marker='o', lw=2, ms=6, label='Rank Accuracy / Recall (%)')
+plt.plot(LEVELS, rank_prec, marker='s', lw=1.5, ms=5, ls='--', alpha=0.8, label='Precision (%)')
+plt.plot(LEVELS, rank_f1, marker='^', lw=1.5, ms=5, ls='-.', alpha=0.8, label='F1-score (%)')
+plt.axhline(best_val_acc, ls=':', c='red', lw=1.2, label=f'Overall Val Acc ({best_val_acc:.2f}%)')
+
+for i, acc_val in enumerate(rank_acc):
+    plt.annotate(f'{acc_val:.1f}%',
+                 xy=(i, acc_val),
+                 xytext=(0, 8),
+                 textcoords='offset points',
+                 ha='center', fontsize=9, fontweight='bold')
+
+plt.title('Per-Rank Prediction Accuracy')
+plt.xlabel('Rank')
+plt.ylabel('Percentage (%)')
+plt.ylim(0, max(rank_acc.max() + 12, 70))
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig('rank_accuracy_curve.png', dpi=150)
+plt.close()
+print("各棋力等級預測準確度折線圖已儲存為 rank_accuracy_curve.png")
+
+# --- 生成競賽計分指標比較折線圖 (competition_metrics_curve.png) ---
+comp_df = pd.DataFrame(comp_history)
+best_score_row = comp_df.loc[comp_df['comp_score'].idxmax()]
+
+plt.figure(figsize=(10, 5))
+plt.plot(comp_df['epoch'], comp_df['within1_acc'], marker='^', lw=2, ms=4,
+         color='#2ca02c', label='Within ±1 Rank (|diff| <= 1)')
+plt.plot(comp_df['epoch'], comp_df['comp_score'], marker='D', lw=2.2, ms=4.5,
+         color='#d62728', label='AICUP Competition Score (Exact + e^-1 * Off-by-1)')
+plt.plot(comp_df['epoch'], comp_df['exact_acc'], marker='o', lw=2, ms=4,
+         color='#ff7f0e', label='Exact Match (|diff| = 0)')
+plt.plot(comp_df['epoch'], comp_df['mid8_acc'], marker='v', lw=1.8, ms=4, ls='-.',
+         color='#9467bd', label='Middle-8 Ranks Avg (C ~ 5D)')
+plt.plot(comp_df['epoch'], comp_df['off1_acc'], marker='s', lw=1.8, ms=4, ls='--',
+         color='#1f77b4', label='Adjacent Off-by-1 (|diff| = 1)')
+
+plt.axvline(best_score_row['epoch'], ls='--', c='gray', lw=1)
+plt.annotate('best score %.2f%% (Ep %d)' % (best_score_row['comp_score'], int(best_score_row['epoch'])),
+             xy=(best_score_row['epoch'], best_score_row['comp_score']),
+             xytext=(max(1, best_score_row['epoch'] - 8), best_score_row['comp_score'] + 3.5),
+             arrowprops=dict(arrowstyle='->', color='#d62728'),
+             fontsize=9, fontweight='bold', color='#d62728')
+plt.annotate('within ±1: %.2f%%' % best_score_row['within1_acc'],
+             xy=(best_score_row['epoch'], best_score_row['within1_acc']),
+             xytext=(max(1, best_score_row['epoch'] - 8), best_score_row['within1_acc'] + 2.5),
+             arrowprops=dict(arrowstyle='->', color='#2ca02c'),
+             fontsize=9, fontweight='bold', color='#2ca02c')
+
+plt.title('Validation Competition Metrics per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Percentage / Score (%)')
+plt.ylim(20, max(comp_df['within1_acc'].max() + 8, 78))
+plt.legend(loc='lower right')
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig('competition_metrics_curve.png', dpi=150)
+plt.close()
+print("競賽計分指標比較折線圖已儲存為 competition_metrics_curve.png")
 
 GPU_BATCH = 64
 _infer_parser = SGFParseRankPrediction()

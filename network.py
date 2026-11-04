@@ -2,35 +2,77 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation 通道注意力機制：動態強化關鍵手數、新落子、氣數快照與邊界特徵通道。"""
+    def __init__(self, channels, reduction=8):
+        super().__init__()
+        mid_channels = max(channels // reduction, 8)
+        self.fc1 = nn.Linear(channels, mid_channels)
+        self.fc2 = nn.Linear(mid_channels, channels)
+
+    def forward(self, x):
+        # Squeeze: 全域平均池化濃縮各通道空間響應 (B, C, 19, 19) -> (B, C)
+        w = x.mean(dim=(-2, -1))
+        # Excitation: 學習各通道重要性權重 (0 ~ 1) 並回乘原特徵圖
+        w = F.relu(self.fc1(w))
+        w = torch.sigmoid(self.fc2(w)).unsqueeze(-1).unsqueeze(-1)
+        return x * w
+
+
 class ResidualBlock(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, use_se=True, se_reduction=8):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(channels,momentum=0.05)
+        self.bn1 = nn.BatchNorm2d(channels, momentum=0.05)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(channels,momentum=0.05)
+        self.bn2 = nn.BatchNorm2d(channels, momentum=0.05)
+        self.se = SEBlock(channels, reduction=se_reduction) if use_se else nn.Identity()
 
     def forward(self, x):
         residual = x
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
+        out = self.se(out)
         out += residual
         return F.relu(out)
 
 class GoRankResNet(nn.Module):
     """
     A ResNet-based model for ranking Go positions.
-    Input: (B, 501, 19, 19)
+    Input: (B, 501, 19, 19) -> GPU 即時推導逐手新落子 (500)、10 個關鍵時期氣數快照 (60) 與棋盤邊界線 (2)，共 1063 通道
     Output: (B, 10) - scores for the 10 rank classes
     """
-    # 擴展模型容量為 256 通道 × 16 層殘差塊，結合全域池化 + 3x3 九宮格區域池化與 256 維分類頭。
+    # 擴展模型容量為 256 通道 × 16 層 SE-ResNet 殘差塊，結合全域池化 + 3x3 九宮格區域池化與 256 維分類頭。
     def __init__(self, in_channels=501, num_channels=256, num_blocks=16, num_classes=10):
         super().__init__()
-        self.conv_in = nn.Conv2d(in_channels, num_channels, 3, padding=1)
-        self.bn_in = nn.BatchNorm2d(num_channels,momentum=0.05)
+        self.history_length = (in_channels - 1) // 2
+        self.history_channels = self.history_length * 2
+        # 每 25 手取一次戰局氣數快照（第 25, 50, ..., 250 手，共 10 個時期 × 雙方 2 人 × 3 種氣 = 60 通道）
+        self.snapshot_indices = list(range(24, self.history_length, 25))
+        self.liberty_channels = len(self.snapshot_indices) * 6
+        self.border_channels = 2
+        # 原始 501 通道 + 逐手新落子 500 通道 + 關鍵時期氣數快照 60 通道 + 棋盤邊界線 2 通道 = 1063 通道
+        total_in_channels = in_channels + self.history_channels + self.liberty_channels + self.border_channels
+
+        # 預先建立連通塊座標編號 (1..361) 與棋盤邊界線特徵 (一二線邊界層 + 三四線定石層)
+        coord_ids = torch.arange(1, 19 * 19 + 1, dtype=torch.float32).view(1, 1, 19, 19)
+        self.register_buffer('coord_ids', coord_ids, persistent=False)
+
+        border_planes = torch.zeros((1, 2, 19, 19), dtype=torch.float32)
+        for r in range(19):
+            for c in range(19):
+                dist = min(r, c, 18 - r, 18 - c)
+                if dist <= 1:
+                    border_planes[0, 0, r, c] = 1.0  # 一線、二線（邊界/死亡線）
+                elif dist <= 3:
+                    border_planes[0, 1, r, c] = 1.0  # 三線、四線（實地線/勢力定石線）
+        self.register_buffer('border_planes', border_planes, persistent=False)
+
+        self.conv_in = nn.Conv2d(total_in_channels, num_channels, 3, padding=1)
+        self.bn_in = nn.BatchNorm2d(num_channels, momentum=0.05)
         
         self.layers = nn.Sequential(
-            *[ResidualBlock(num_channels) for _ in range(num_blocks)]
+            *[ResidualBlock(num_channels, use_se=True, se_reduction=8) for _ in range(num_blocks)]
         )
         # 3x3 九宮格區域池化：將 19x19 棋盤濃縮為「四角、四邊、中腹」9 個戰略區域 (64 * 3 * 3 = 576 維)
         self.spatial_conv = nn.Sequential(
@@ -50,7 +92,89 @@ class GoRankResNet(nn.Module):
             nn.Linear(num_channels, num_classes)
         )
 
+    @torch.no_grad()
+    def _compute_snapshot_liberty_planes(self, snap_boards, dtype):
+        """
+        於 GPU 即時計算 10 個關鍵時間點（第 25, 50, ..., 250 手）各連通棋塊的精確氣數：
+        - 1 氣 (叫吃 Atari)、2 氣 (氣緊對殺)、>= 3 氣 (氣長安定)，雙方共 10 * 2 * 3 = 60 通道
+        """
+        b, s, _, h, w = snap_boards.shape
+        stones = snap_boards > 0.5
+        empty = ~(stones[:, :, 0:1] | stones[:, :, 1:2])
+        empty_2 = empty.expand(b, s, 2, h, w).reshape(-1, h, w)
+        stones_flat = stones.reshape(-1, 1, h, w)
+        n = stones_flat.size(0)
+
+        stones_f = stones_flat.to(torch.float32)
+        group_id = stones_f * self.coord_ids
+
+        # 4 連通塊 Flood-Fill 傳播同塊棋的最大座標 ID
+        for _ in range(16):
+            p = F.pad(group_id, (1, 1, 1, 1), value=0.0)
+            up = p[:, :, :-2, 1:-1]
+            down = p[:, :, 2:, 1:-1]
+            left = p[:, :, 1:-1, :-2]
+            right = p[:, :, 1:-1, 2:]
+            group_id = torch.maximum(
+                group_id,
+                torch.maximum(torch.maximum(up, down), torch.maximum(left, right))
+            ) * stones_f
+
+        gid = group_id.squeeze(1).to(torch.int64)
+        p_gid = F.pad(gid, (1, 1, 1, 1), value=0)
+
+        # 檢查每個空交叉點上下左右緊鄰的棋塊 ID，並去重避免同一空點對同一棋塊重複算氣
+        g_up = p_gid[:, :-2, 1:-1] * empty_2
+        g_down = p_gid[:, 2:, 1:-1] * empty_2
+        g_left = p_gid[:, 1:-1, :-2] * empty_2
+        g_right = p_gid[:, 1:-1, 2:] * empty_2
+
+        v_up = (g_up > 0).to(torch.int32)
+        v_down = ((g_down > 0) & (g_down != g_up)).to(torch.int32)
+        v_left = ((g_left > 0) & (g_left != g_up) & (g_left != g_down)).to(torch.int32)
+        v_right = ((g_right > 0) & (g_right != g_up) & (g_right != g_down) & (g_right != g_left)).to(torch.int32)
+
+        lib_counts = torch.zeros((n, h * w + 1), device=snap_boards.device, dtype=torch.int32)
+        lib_counts.scatter_add_(1, g_up.reshape(n, -1), v_up.reshape(n, -1))
+        lib_counts.scatter_add_(1, g_down.reshape(n, -1), v_down.reshape(n, -1))
+        lib_counts.scatter_add_(1, g_left.reshape(n, -1), v_left.reshape(n, -1))
+        lib_counts.scatter_add_(1, g_right.reshape(n, -1), v_right.reshape(n, -1))
+        lib_counts[:, 0] = 0
+
+        stone_libs = torch.gather(lib_counts, 1, gid.reshape(n, -1)).reshape(b, s, 2, h, w)
+        lib_1 = (stone_libs == 1).to(dtype)
+        lib_2 = (stone_libs == 2).to(dtype)
+        lib_3 = (stone_libs >= 3).to(dtype)
+
+        return torch.stack([lib_1, lib_2, lib_3], dim=3).reshape(b, s * 6, h, w)
+
+    @torch.no_grad()
+    def _append_tactical_and_spatial_planes(self, x):
+        """
+        於 GPU 即時從前 500 個逐手盤面通道推導（不增加磁碟分片體積與 I/O 負擔）：
+        - new_moves (500 通道): 每一手剛落下的新子位置 (S_t - S_{t-1} == +1)
+        - liberty_planes (60 通道): 第 25, 50, ..., 250 手雙方的 1 氣、2 氣、>=3 氣戰術快照（取代稀疏的 500 層提死子）
+        - border_planes (2 通道): 棋盤一二線邊界層與三四線定石層
+        """
+        b = x.size(0)
+        boards = x[:, :self.history_channels].reshape(b, self.history_length, 2, 19, 19)
+
+        # 有效手遮罩：真實落子後盤面必有棋子 (> 0)；不足 250 手的末端補零 (Post-padding) 則全盤為 0
+        step_valid = (boards[:, 1:].amax(dim=(2, 3, 4), keepdim=True) > 0).to(x.dtype)
+        diff_next = (boards[:, 1:] - boards[:, :-1]) * step_valid
+
+        new_moves = torch.cat(
+            [boards[:, :1], F.relu(diff_next)], dim=1
+        ).reshape(b, self.history_channels, 19, 19)
+
+        snap_boards = boards[:, self.snapshot_indices]
+        liberty_planes = self._compute_snapshot_liberty_planes(snap_boards, x.dtype)
+        border_planes = self.border_planes.expand(b, -1, -1, -1).to(x.dtype)
+
+        return torch.cat([x, new_moves, liberty_planes, border_planes], dim=1)
+
     def forward(self, x):
+        x = self._append_tactical_and_spatial_planes(x)
         out = F.relu(self.bn_in(self.conv_in(x))) # Initial block
         out = self.layers(out) # Residual blocks
         avg_pool = F.adaptive_avg_pool2d(out, (1, 1)).view(out.size(0), -1)
@@ -73,7 +197,7 @@ class GoPlayerResNet(nn.Module):
         self.bn_in = nn.BatchNorm2d(num_channels)
         
         self.layers = nn.Sequential(
-            *[ResidualBlock(num_channels) for _ in range(num_blocks)]
+            *[ResidualBlock(num_channels, use_se=False) for _ in range(num_blocks)]
         )
         
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
