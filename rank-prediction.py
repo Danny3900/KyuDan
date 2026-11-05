@@ -19,18 +19,21 @@ from sklearn.model_selection import train_test_split
 from utils import SGFParseRankPrediction
 from network import GoRankResNet
 '''
-11/03修改內容（移除 500 層稀疏提死子特徵，改於 GPU 即時推導 60 層關鍵時期氣數快照 ＋ 2 層棋盤邊界線，共 1063 通道）
-1. 修改原因與問題診斷：
-   - 11/02 整合版 (1501 通道) 實測成果：train acc 41.65%、最佳 val(EMA) acc 37.81% (Ep30)、中間 8 段平均 32.26% (2D 達 26.41% 歷史新高)、
-     差一階以內 (Within ±1 Rank) 達 69.35% (69,352/100,000)、單盤 AICUP 官方分數達 0.4942 (全面超越組員 softmax 版的 31.84% / 68.86% / 0.4928)。
-   - 後段輕微過擬合診斷：val(EMA) loss 於 Ep24 觸底 (1.6769) 後微幅反彈至 Ep30 (1.6851)。主因之一為 500 層逐手提死子 (dead_captures) 超過 98% 為 0（極度稀疏），
-     佔用第一層約 115 萬個參數，易記憶訓練集特定手數之提子特例；且無法反映棋子被提掉前的叫吃與對殺氣緊狀態。
+11/05修改內容（整合官方 v1.1 讓子資訊 HD[n]：新增 3 層讓子與執子交叉通道 + 還原 HD[2..9] 星位預擺讓子，共 504 基礎通道 / 1086 總通道）
+1. 11/04 實驗與公開榜結果 (1083 通道：DropPath 0.0->0.10 + 20 層區間累積提死子 + weight_decay=2e-2)：
+   - 訓練 30 epochs 耗時 5.62 小時 (337.4 分)；train acc 40.99% (成功抑制過度記憶)、最佳 val(EMA) acc 37.80% (Ep30)、
+     差一階以內 (Within ±1 Rank) 達 69.43% (69,426/100,000 歷史新高)、單盤 AICUP 官方分數達 49.43% (0.4943 歷史新高)；
+     val(EMA) loss 延後至 Ep26 觸底 (1.6718 全場最低)，至 Ep30 僅微幅波動 0.0033 (1.6751)，過擬合反彈幅度砍半以上。
+   - Public Leaderboard 成績由 0.5851699 提升至 0.5928123 (三模型合體) / 0.5916335 (Run 13 單模型)。
 2. 具體修改：
-   - network.py: 移除 500 層稀疏的 dead_captures，保留 500 層逐手新落子 (new_moves)；
-   - 新增 GPU 即時連通塊氣數計算 (_compute_snapshot_liberty_planes)：於第 25, 50, ..., 250 手 (共 10 個時期) 計算雙方棋塊之
-     「1 氣 (叫吃)、2 氣 (氣緊)、>=3 氣 (安定)」共 60 通道；
-   - 新增棋盤空間邊界線特徵 (border_planes)：一二線邊界層 + 三四線定石層共 2 通道；
-   - 總輸入通道由 1501 精簡為 1063 (501 原始 + 500 新落子 + 60 氣數快照 + 2 邊界線)，免重抽磁碟分片 (.tar.gz)。
+   - utils.py:
+     (a) 新增 _parse_handicap() 解析 SGF 根節點之 HD[0] ~ HD[9] 讓子屬性；
+     (b) 針對訓練集中 HD[2] ~ HD[9] 之讓子棋，於 _extract_game_states() 開局前依標準星位座標 (HANDICAP_POSITIONS) 還原預擺讓子，修正星位氣數與吃子計算；
+     (c) 於 _extract_features() 末端新增 3 個通道：第 502 通道 is_handicap (HD>=1)、第 503 通道 is_giving_handicap (HD>=1 且執白 W)、
+         第 504 通道 is_taking_handicap (HD>=1 且執黑 B)，基礎特徵形狀升級為 (504, 19, 19) uint8，觸發自動重抽分片。
+   - network.py: GoRankResNet 預設 in_channels=504 (固定 history_length=250)，連同 GPU 即時推導特徵共 1086 通道。
+
+
 
 '''
 # --- 加入日誌記錄功能 ---
@@ -302,7 +305,7 @@ class ModelEMA:
 
 model = GoRankResNet(num_classes=NUM_CLASSES).to(DEVICE)
 ema_model = ModelEMA(model, decay=EMA_DECAY)
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-2)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=2e-2)
 warmup_scheduler = optim.lr_scheduler.LinearLR(
     optimizer, start_factor=0.3, end_factor=1.0, total_iters=WARMUP_EPOCHS
 )

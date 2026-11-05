@@ -1,0 +1,562 @@
+torch 2.5.1+cu121 | cuda 12.1 | webdataset 1.0.2
+device cuda
+整體比例
+rank
+1D    0.1
+2D    0.1
+3D    0.1
+4D    0.1
+5D    0.1
+6D    0.1
+A     0.1
+B     0.1
+C     0.1
+D     0.1
+Name: proportion, dtype: float64
+訓練集比例
+rank
+1D    0.1
+2D    0.1
+3D    0.1
+4D    0.1
+5D    0.1
+6D    0.1
+A     0.1
+B     0.1
+C     0.1
+D     0.1
+Name: proportion, dtype: float64
+驗證集比例
+rank
+1D    0.1
+2D    0.1
+3D    0.1
+4D    0.1
+5D    0.1
+6D    0.1
+A     0.1
+B     0.1
+C     0.1
+D     0.1
+Name: proportion, dtype: float64
+一局棋的特徵形狀: (501, 19, 19) uint8
+偵測到分片已存在且形狀相符 (501, 19, 19)，跳過特徵抽取！
+分片：train 904 / val 104
+num_workers=4 驗證通過（100000 筆）
+一個 batch: torch.Size([128, 501, 19, 19]) [9, 2, 9, 1, 4, 4, 8, 6]
+參數量 21,913,994
+batch 128 | lr 0.001 (warmup 2 ep) | ema 0.9995 | epochs 30
+  ep1 step 500  loss 2.2885  acc 12.66%  0.7 分
+  ep1 step 1000  loss 2.2401  acc 14.42%  1.3 分
+  ep1 step 1500  loss 2.2094  acc 15.35%  1.9 分
+  ep1 step 2000  loss 2.1902  acc 16.06%  2.5 分
+  ep1 step 2500  loss 2.1752  acc 16.57%  3.1 分
+  ep1 step 3000  loss 2.1638  acc 16.97%  3.7 分
+  ep1 step 3500  loss 2.1533  acc 17.33%  4.3 分
+  ep1 step 4000  loss 2.1443  acc 17.64%  4.9 分
+  ep1 step 4500  loss 2.1363  acc 17.91%  5.6 分
+  ep1 step 5000  loss 2.1293  acc 18.18%  6.2 分
+  ep1 step 5500  loss 2.1235  acc 18.39%  6.8 分
+  ep1 step 6000  loss 2.1178  acc 18.58%  7.4 分
+  ep1 step 6500  loss 2.1124  acc 18.75%  8.0 分
+  ep1 step 7000  loss 2.1071  acc 18.93%  8.6 分
+Epoch 1/30  lr 0.000300  |  train loss 2.1069 acc 18.93%  |  val(EMA) loss 2.0242 acc 22.08%  |  11.0 分
+  新的最佳 val(EMA) acc 22.08% —— 已存 best_model.pth
+  ep2 step 500  loss 2.0639  acc 20.14%  0.6 分
+  ep2 step 1000  loss 2.0595  acc 20.49%  1.2 分
+  ep2 step 1500  loss 2.0557  acc 20.66%  1.9 分
+  ep2 step 2000  loss 2.0530  acc 20.70%  2.5 分
+  ep2 step 2500  loss 2.0504  acc 20.75%  3.1 分
+  ep2 step 3000  loss 2.0487  acc 20.84%  3.7 分
+  ep2 step 3500  loss 2.0454  acc 20.95%  4.3 分
+  ep2 step 4000  loss 2.0431  acc 21.04%  4.9 分
+  ep2 step 4500  loss 2.0414  acc 21.10%  5.5 分
+  ep2 step 5000  loss 2.0390  acc 21.17%  6.2 分
+  ep2 step 5500  loss 2.0364  acc 21.26%  6.8 分
+  ep2 step 6000  loss 2.0341  acc 21.33%  7.4 分
+  ep2 step 6500  loss 2.0321  acc 21.42%  8.0 分
+  ep2 step 7000  loss 2.0296  acc 21.52%  8.6 分
+Epoch 2/30  lr 0.000650  |  train loss 2.0295 acc 21.52%  |  val(EMA) loss 1.9640 acc 23.92%  |  11.0 分
+  新的最佳 val(EMA) acc 23.92% —— 已存 best_model.pth
+  ep3 step 500  loss 2.0115  acc 22.52%  0.6 分
+  ep3 step 1000  loss 2.0135  acc 22.32%  1.2 分
+  ep3 step 1500  loss 2.0106  acc 22.38%  1.9 分
+  ep3 step 2000  loss 2.0093  acc 22.36%  2.5 分
+  ep3 step 2500  loss 2.0066  acc 22.44%  3.1 分
+  ep3 step 3000  loss 2.0038  acc 22.54%  3.7 分
+  ep3 step 3500  loss 2.0019  acc 22.62%  4.3 分
+  ep3 step 4000  loss 2.0003  acc 22.70%  4.9 分
+  ep3 step 4500  loss 1.9988  acc 22.75%  5.5 分
+  ep3 step 5000  loss 1.9966  acc 22.83%  6.2 分
+  ep3 step 5500  loss 1.9944  acc 22.90%  6.8 分
+  ep3 step 6000  loss 1.9923  acc 22.97%  7.4 分
+  ep3 step 6500  loss 1.9910  acc 23.01%  8.0 分
+  ep3 step 7000  loss 1.9895  acc 23.06%  8.6 分
+Epoch 3/30  lr 0.001000  |  train loss 1.9894 acc 23.06%  |  val(EMA) loss 1.9280 acc 25.23%  |  11.0 分
+  新的最佳 val(EMA) acc 25.23% —— 已存 best_model.pth
+  ep4 step 500  loss 1.9597  acc 24.27%  0.6 分
+  ep4 step 1000  loss 1.9561  acc 24.20%  1.2 分
+  ep4 step 1500  loss 1.9533  acc 24.29%  1.9 分
+  ep4 step 2000  loss 1.9509  acc 24.36%  2.5 分
+  ep4 step 2500  loss 1.9499  acc 24.41%  3.1 分
+  ep4 step 3000  loss 1.9490  acc 24.42%  3.7 分
+  ep4 step 3500  loss 1.9476  acc 24.47%  4.3 分
+  ep4 step 4000  loss 1.9463  acc 24.48%  4.9 分
+  ep4 step 4500  loss 1.9446  acc 24.53%  5.5 分
+  ep4 step 5000  loss 1.9433  acc 24.59%  6.2 分
+  ep4 step 5500  loss 1.9420  acc 24.64%  6.8 分
+  ep4 step 6000  loss 1.9402  acc 24.74%  7.4 分
+  ep4 step 6500  loss 1.9387  acc 24.80%  8.0 分
+  ep4 step 7000  loss 1.9376  acc 24.84%  8.6 分
+Epoch 4/30  lr 0.000997  |  train loss 1.9374 acc 24.84%  |  val(EMA) loss 1.8896 acc 27.04%  |  11.0 分
+  新的最佳 val(EMA) acc 27.04% —— 已存 best_model.pth
+  ep5 step 500  loss 1.9144  acc 25.32%  0.6 分
+  ep5 step 1000  loss 1.9183  acc 25.48%  1.2 分
+  ep5 step 1500  loss 1.9158  acc 25.61%  1.9 分
+  ep5 step 2000  loss 1.9133  acc 25.69%  2.5 分
+  ep5 step 2500  loss 1.9114  acc 25.81%  3.1 分
+  ep5 step 3000  loss 1.9114  acc 25.77%  3.7 分
+  ep5 step 3500  loss 1.9105  acc 25.84%  4.3 分
+  ep5 step 4000  loss 1.9103  acc 25.84%  4.9 分
+  ep5 step 4500  loss 1.9100  acc 25.85%  5.5 分
+  ep5 step 5000  loss 1.9092  acc 25.93%  6.2 分
+  ep5 step 5500  loss 1.9081  acc 25.97%  6.8 分
+  ep5 step 6000  loss 1.9067  acc 26.03%  7.4 分
+  ep5 step 6500  loss 1.9059  acc 26.05%  8.0 分
+  ep5 step 7000  loss 1.9056  acc 26.07%  8.6 分
+Epoch 5/30  lr 0.000988  |  train loss 1.9057 acc 26.07%  |  val(EMA) loss 1.8649 acc 28.18%  |  11.0 分
+  新的最佳 val(EMA) acc 28.18% —— 已存 best_model.pth
+  ep6 step 500  loss 1.8994  acc 26.65%  0.6 分
+  ep6 step 1000  loss 1.8952  acc 26.48%  1.2 分
+  ep6 step 1500  loss 1.8927  acc 26.52%  1.9 分
+  ep6 step 2000  loss 1.8890  acc 26.59%  2.5 分
+  ep6 step 2500  loss 1.8875  acc 26.66%  3.1 分
+  ep6 step 3000  loss 1.8862  acc 26.72%  3.7 分
+  ep6 step 3500  loss 1.8848  acc 26.79%  4.3 分
+  ep6 step 4000  loss 1.8840  acc 26.82%  4.9 分
+  ep6 step 4500  loss 1.8829  acc 26.84%  5.5 分
+  ep6 step 5000  loss 1.8819  acc 26.87%  6.2 分
+  ep6 step 5500  loss 1.8810  acc 26.92%  6.8 分
+  ep6 step 6000  loss 1.8801  acc 26.96%  7.4 分
+  ep6 step 6500  loss 1.8795  acc 26.98%  8.0 分
+  ep6 step 7000  loss 1.8786  acc 27.02%  8.6 分
+Epoch 6/30  lr 0.000972  |  train loss 1.8786 acc 27.02%  |  val(EMA) loss 1.8431 acc 28.97%  |  11.0 分
+  新的最佳 val(EMA) acc 28.97% —— 已存 best_model.pth
+  ep7 step 500  loss 1.8638  acc 27.73%  0.6 分
+  ep7 step 1000  loss 1.8620  acc 27.75%  1.2 分
+  ep7 step 1500  loss 1.8613  acc 27.70%  1.9 分
+  ep7 step 2000  loss 1.8609  acc 27.70%  2.5 分
+  ep7 step 2500  loss 1.8608  acc 27.76%  3.1 分
+  ep7 step 3000  loss 1.8599  acc 27.80%  3.7 分
+  ep7 step 3500  loss 1.8586  acc 27.83%  4.3 分
+  ep7 step 4000  loss 1.8579  acc 27.88%  4.9 分
+  ep7 step 4500  loss 1.8565  acc 27.92%  5.5 分
+  ep7 step 5000  loss 1.8565  acc 27.92%  6.2 分
+  ep7 step 5500  loss 1.8559  acc 27.94%  6.8 分
+  ep7 step 6000  loss 1.8554  acc 27.96%  7.4 分
+  ep7 step 6500  loss 1.8549  acc 27.99%  8.0 分
+  ep7 step 7000  loss 1.8547  acc 28.00%  8.6 分
+Epoch 7/30  lr 0.000951  |  train loss 1.8548 acc 28.00%  |  val(EMA) loss 1.8213 acc 29.92%  |  11.0 分
+  新的最佳 val(EMA) acc 29.92% —— 已存 best_model.pth
+  ep8 step 500  loss 1.8423  acc 28.50%  0.6 分
+  ep8 step 1000  loss 1.8405  acc 28.64%  1.2 分
+  ep8 step 1500  loss 1.8400  acc 28.66%  1.9 分
+  ep8 step 2000  loss 1.8393  acc 28.63%  2.5 分
+  ep8 step 2500  loss 1.8382  acc 28.66%  3.1 分
+  ep8 step 3000  loss 1.8371  acc 28.69%  3.7 分
+  ep8 step 3500  loss 1.8365  acc 28.74%  4.3 分
+  ep8 step 4000  loss 1.8354  acc 28.77%  4.9 分
+  ep8 step 4500  loss 1.8344  acc 28.79%  5.5 分
+  ep8 step 5000  loss 1.8343  acc 28.80%  6.2 分
+  ep8 step 5500  loss 1.8347  acc 28.80%  6.8 分
+  ep8 step 6000  loss 1.8342  acc 28.82%  7.4 分
+  ep8 step 6500  loss 1.8344  acc 28.81%  8.0 分
+  ep8 step 7000  loss 1.8341  acc 28.83%  8.6 分
+Epoch 8/30  lr 0.000924  |  train loss 1.8341 acc 28.83%  |  val(EMA) loss 1.8039 acc 30.55%  |  11.0 分
+  新的最佳 val(EMA) acc 30.55% —— 已存 best_model.pth
+  ep9 step 500  loss 1.8217  acc 29.20%  0.6 分
+  ep9 step 1000  loss 1.8211  acc 29.30%  1.2 分
+  ep9 step 1500  loss 1.8197  acc 29.32%  1.9 分
+  ep9 step 2000  loss 1.8204  acc 29.33%  2.5 分
+  ep9 step 2500  loss 1.8188  acc 29.38%  3.1 分
+  ep9 step 3000  loss 1.8179  acc 29.42%  3.7 分
+  ep9 step 3500  loss 1.8182  acc 29.40%  4.3 分
+  ep9 step 4000  loss 1.8176  acc 29.43%  4.9 分
+  ep9 step 4500  loss 1.8178  acc 29.40%  5.5 分
+  ep9 step 5000  loss 1.8172  acc 29.41%  6.2 分
+  ep9 step 5500  loss 1.8164  acc 29.44%  6.8 分
+  ep9 step 6000  loss 1.8161  acc 29.45%  7.4 分
+  ep9 step 6500  loss 1.8160  acc 29.44%  8.0 分
+  ep9 step 7000  loss 1.8152  acc 29.47%  8.6 分
+Epoch 9/30  lr 0.000892  |  train loss 1.8150 acc 29.48%  |  val(EMA) loss 1.7866 acc 31.32%  |  11.0 分
+  新的最佳 val(EMA) acc 31.32% —— 已存 best_model.pth
+  ep10 step 500  loss 1.8006  acc 29.97%  0.6 分
+  ep10 step 1000  loss 1.8007  acc 30.05%  1.2 分
+  ep10 step 1500  loss 1.7999  acc 30.08%  1.9 分
+  ep10 step 2000  loss 1.8007  acc 30.08%  2.5 分
+  ep10 step 2500  loss 1.8007  acc 30.10%  3.1 分
+  ep10 step 3000  loss 1.8015  acc 30.12%  3.7 分
+  ep10 step 3500  loss 1.8010  acc 30.16%  4.3 分
+  ep10 step 4000  loss 1.8011  acc 30.15%  4.9 分
+  ep10 step 4500  loss 1.8011  acc 30.12%  5.5 分
+  ep10 step 5000  loss 1.8007  acc 30.11%  6.2 分
+  ep10 step 5500  loss 1.8006  acc 30.14%  6.8 分
+  ep10 step 6000  loss 1.8002  acc 30.15%  7.4 分
+  ep10 step 6500  loss 1.7997  acc 30.17%  8.0 分
+  ep10 step 7000  loss 1.7995  acc 30.20%  8.6 分
+Epoch 10/30  lr 0.000855  |  train loss 1.7995 acc 30.20%  |  val(EMA) loss 1.7740 acc 31.96%  |  11.0 分
+  新的最佳 val(EMA) acc 31.96% —— 已存 best_model.pth
+  ep11 step 500  loss 1.7875  acc 30.63%  0.6 分
+  ep11 step 1000  loss 1.7862  acc 30.78%  1.2 分
+  ep11 step 1500  loss 1.7873  acc 30.67%  1.9 分
+  ep11 step 2000  loss 1.7871  acc 30.62%  2.5 分
+  ep11 step 2500  loss 1.7866  acc 30.66%  3.1 分
+  ep11 step 3000  loss 1.7862  acc 30.69%  3.7 分
+  ep11 step 3500  loss 1.7860  acc 30.67%  4.3 分
+  ep11 step 4000  loss 1.7862  acc 30.67%  4.9 分
+  ep11 step 4500  loss 1.7860  acc 30.69%  5.5 分
+  ep11 step 5000  loss 1.7856  acc 30.69%  6.1 分
+  ep11 step 5500  loss 1.7855  acc 30.71%  6.8 分
+  ep11 step 6000  loss 1.7854  acc 30.71%  7.4 分
+  ep11 step 6500  loss 1.7850  acc 30.74%  8.0 分
+  ep11 step 7000  loss 1.7852  acc 30.71%  8.6 分
+Epoch 11/30  lr 0.000814  |  train loss 1.7854 acc 30.71%  |  val(EMA) loss 1.7662 acc 32.42%  |  11.0 分
+  新的最佳 val(EMA) acc 32.42% —— 已存 best_model.pth
+  ep12 step 500  loss 1.7730  acc 31.32%  0.6 分
+  ep12 step 1000  loss 1.7726  acc 31.45%  1.2 分
+  ep12 step 1500  loss 1.7720  acc 31.40%  1.9 分
+  ep12 step 2000  loss 1.7716  acc 31.42%  2.5 分
+  ep12 step 2500  loss 1.7718  acc 31.37%  3.1 分
+  ep12 step 3000  loss 1.7711  acc 31.40%  3.7 分
+  ep12 step 3500  loss 1.7710  acc 31.38%  4.3 分
+  ep12 step 4000  loss 1.7716  acc 31.33%  4.9 分
+  ep12 step 4500  loss 1.7711  acc 31.36%  5.5 分
+  ep12 step 5000  loss 1.7711  acc 31.37%  6.2 分
+  ep12 step 5500  loss 1.7713  acc 31.36%  6.8 分
+  ep12 step 6000  loss 1.7710  acc 31.39%  7.4 分
+  ep12 step 6500  loss 1.7710  acc 31.38%  8.0 分
+  ep12 step 7000  loss 1.7704  acc 31.39%  8.6 分
+Epoch 12/30  lr 0.000768  |  train loss 1.7704 acc 31.39%  |  val(EMA) loss 1.7631 acc 32.77%  |  11.0 分
+  新的最佳 val(EMA) acc 32.77% —— 已存 best_model.pth
+  ep13 step 500  loss 1.7594  acc 32.03%  0.6 分
+  ep13 step 1000  loss 1.7594  acc 31.85%  1.2 分
+  ep13 step 1500  loss 1.7564  acc 31.99%  1.9 分
+  ep13 step 2000  loss 1.7573  acc 31.93%  2.5 分
+  ep13 step 2500  loss 1.7567  acc 31.93%  3.1 分
+  ep13 step 3000  loss 1.7559  acc 31.97%  3.7 分
+  ep13 step 3500  loss 1.7557  acc 31.99%  4.3 分
+  ep13 step 4000  loss 1.7552  acc 31.98%  4.9 分
+  ep13 step 4500  loss 1.7551  acc 31.94%  5.5 分
+  ep13 step 5000  loss 1.7551  acc 31.94%  6.2 分
+  ep13 step 5500  loss 1.7550  acc 31.95%  6.8 分
+  ep13 step 6000  loss 1.7550  acc 31.93%  7.4 分
+  ep13 step 6500  loss 1.7550  acc 31.92%  8.0 分
+  ep13 step 7000  loss 1.7550  acc 31.91%  8.6 分
+Epoch 13/30  lr 0.000720  |  train loss 1.7550 acc 31.91%  |  val(EMA) loss 1.7481 acc 33.47%  |  11.0 分
+  新的最佳 val(EMA) acc 33.47% —— 已存 best_model.pth
+  ep14 step 500  loss 1.7401  acc 32.55%  0.6 分
+  ep14 step 1000  loss 1.7423  acc 32.46%  1.2 分
+  ep14 step 1500  loss 1.7413  acc 32.57%  1.9 分
+  ep14 step 2000  loss 1.7404  acc 32.58%  2.5 分
+  ep14 step 2500  loss 1.7402  acc 32.55%  3.1 分
+  ep14 step 3000  loss 1.7402  acc 32.53%  3.7 分
+  ep14 step 3500  loss 1.7396  acc 32.54%  4.3 分
+  ep14 step 4000  loss 1.7397  acc 32.56%  4.9 分
+  ep14 step 4500  loss 1.7394  acc 32.58%  5.5 分
+  ep14 step 5000  loss 1.7391  acc 32.58%  6.2 分
+  ep14 step 5500  loss 1.7389  acc 32.61%  6.8 分
+  ep14 step 6000  loss 1.7388  acc 32.61%  7.4 分
+  ep14 step 6500  loss 1.7387  acc 32.62%  8.0 分
+  ep14 step 7000  loss 1.7386  acc 32.64%  8.6 分
+Epoch 14/30  lr 0.000668  |  train loss 1.7386 acc 32.64%  |  val(EMA) loss 1.7477 acc 34.00%  |  11.0 分
+  新的最佳 val(EMA) acc 34.00% —— 已存 best_model.pth
+  ep15 step 500  loss 1.7230  acc 32.99%  0.6 分
+  ep15 step 1000  loss 1.7241  acc 33.17%  1.2 分
+  ep15 step 1500  loss 1.7238  acc 33.26%  1.9 分
+  ep15 step 2000  loss 1.7231  acc 33.27%  2.5 分
+  ep15 step 2500  loss 1.7231  acc 33.26%  3.1 分
+  ep15 step 3000  loss 1.7230  acc 33.23%  3.7 分
+  ep15 step 3500  loss 1.7229  acc 33.27%  4.3 分
+  ep15 step 4000  loss 1.7222  acc 33.26%  4.9 分
+  ep15 step 4500  loss 1.7225  acc 33.26%  5.5 分
+  ep15 step 5000  loss 1.7220  acc 33.28%  6.2 分
+  ep15 step 5500  loss 1.7219  acc 33.28%  6.8 分
+  ep15 step 6000  loss 1.7221  acc 33.30%  7.4 分
+  ep15 step 6500  loss 1.7219  acc 33.33%  8.0 分
+  ep15 step 7000  loss 1.7218  acc 33.33%  8.6 分
+Epoch 15/30  lr 0.000615  |  train loss 1.7218 acc 33.33%  |  val(EMA) loss 1.7321 acc 34.46%  |  11.0 分
+  新的最佳 val(EMA) acc 34.46% —— 已存 best_model.pth
+  ep16 step 500  loss 1.7124  acc 33.76%  0.6 分
+  ep16 step 1000  loss 1.7100  acc 33.67%  1.2 分
+  ep16 step 1500  loss 1.7079  acc 33.83%  1.9 分
+  ep16 step 2000  loss 1.7080  acc 33.79%  2.5 分
+  ep16 step 2500  loss 1.7072  acc 33.76%  3.1 分
+  ep16 step 3000  loss 1.7062  acc 33.85%  3.7 分
+  ep16 step 3500  loss 1.7058  acc 33.88%  4.3 分
+  ep16 step 4000  loss 1.7063  acc 33.88%  4.9 分
+  ep16 step 4500  loss 1.7065  acc 33.89%  5.5 分
+  ep16 step 5000  loss 1.7067  acc 33.89%  6.1 分
+  ep16 step 5500  loss 1.7066  acc 33.87%  6.8 分
+  ep16 step 6000  loss 1.7065  acc 33.89%  7.4 分
+  ep16 step 6500  loss 1.7068  acc 33.86%  8.0 分
+  ep16 step 7000  loss 1.7070  acc 33.88%  8.6 分
+Epoch 16/30  lr 0.000560  |  train loss 1.7070 acc 33.89%  |  val(EMA) loss 1.7162 acc 34.98%  |  11.0 分
+  新的最佳 val(EMA) acc 34.98% —— 已存 best_model.pth
+  ep17 step 500  loss 1.6964  acc 34.30%  0.6 分
+  ep17 step 1000  loss 1.6940  acc 34.56%  1.2 分
+  ep17 step 1500  loss 1.6918  acc 34.60%  1.9 分
+  ep17 step 2000  loss 1.6912  acc 34.53%  2.5 分
+  ep17 step 2500  loss 1.6915  acc 34.58%  3.1 分
+  ep17 step 3000  loss 1.6913  acc 34.53%  3.7 分
+  ep17 step 3500  loss 1.6913  acc 34.55%  4.3 分
+  ep17 step 4000  loss 1.6913  acc 34.56%  4.9 分
+  ep17 step 4500  loss 1.6914  acc 34.53%  5.5 分
+  ep17 step 5000  loss 1.6917  acc 34.50%  6.2 分
+  ep17 step 5500  loss 1.6910  acc 34.52%  6.8 分
+  ep17 step 6000  loss 1.6911  acc 34.52%  7.4 分
+  ep17 step 6500  loss 1.6914  acc 34.51%  8.0 分
+  ep17 step 7000  loss 1.6915  acc 34.49%  8.6 分
+Epoch 17/30  lr 0.000505  |  train loss 1.6915 acc 34.49%  |  val(EMA) loss 1.7056 acc 35.32%  |  11.0 分
+  新的最佳 val(EMA) acc 35.32% —— 已存 best_model.pth
+  ep18 step 500  loss 1.6740  acc 35.08%  0.6 分
+  ep18 step 1000  loss 1.6732  acc 35.22%  1.2 分
+  ep18 step 1500  loss 1.6759  acc 35.24%  1.9 分
+  ep18 step 2000  loss 1.6739  acc 35.27%  2.5 分
+  ep18 step 2500  loss 1.6735  acc 35.27%  3.1 分
+  ep18 step 3000  loss 1.6739  acc 35.23%  3.7 分
+  ep18 step 3500  loss 1.6733  acc 35.24%  4.3 分
+  ep18 step 4000  loss 1.6737  acc 35.23%  4.9 分
+  ep18 step 4500  loss 1.6736  acc 35.26%  5.5 分
+  ep18 step 5000  loss 1.6732  acc 35.27%  6.2 分
+  ep18 step 5500  loss 1.6738  acc 35.23%  6.8 分
+  ep18 step 6000  loss 1.6742  acc 35.21%  7.4 分
+  ep18 step 6500  loss 1.6744  acc 35.21%  8.0 分
+  ep18 step 7000  loss 1.6746  acc 35.20%  8.6 分
+Epoch 18/30  lr 0.000450  |  train loss 1.6744 acc 35.21%  |  val(EMA) loss 1.6968 acc 35.62%  |  11.0 分
+  新的最佳 val(EMA) acc 35.62% —— 已存 best_model.pth
+  ep19 step 500  loss 1.6618  acc 35.47%  0.6 分
+  ep19 step 1000  loss 1.6600  acc 35.59%  1.2 分
+  ep19 step 1500  loss 1.6589  acc 35.62%  1.9 分
+  ep19 step 2000  loss 1.6588  acc 35.70%  2.5 分
+  ep19 step 2500  loss 1.6590  acc 35.74%  3.1 分
+  ep19 step 3000  loss 1.6580  acc 35.80%  3.7 分
+  ep19 step 3500  loss 1.6588  acc 35.76%  4.3 分
+  ep19 step 4000  loss 1.6589  acc 35.78%  4.9 分
+  ep19 step 4500  loss 1.6584  acc 35.80%  5.5 分
+  ep19 step 5000  loss 1.6586  acc 35.79%  6.1 分
+  ep19 step 5500  loss 1.6588  acc 35.79%  6.8 分
+  ep19 step 6000  loss 1.6588  acc 35.80%  7.4 分
+  ep19 step 6500  loss 1.6585  acc 35.81%  8.0 分
+  ep19 step 7000  loss 1.6588  acc 35.79%  8.6 分
+Epoch 19/30  lr 0.000395  |  train loss 1.6588 acc 35.80%  |  val(EMA) loss 1.6909 acc 36.15%  |  11.0 分
+  新的最佳 val(EMA) acc 36.15% —— 已存 best_model.pth
+  ep20 step 500  loss 1.6420  acc 36.37%  0.6 分
+  ep20 step 1000  loss 1.6409  acc 36.43%  1.2 分
+  ep20 step 1500  loss 1.6419  acc 36.40%  1.9 分
+  ep20 step 2000  loss 1.6427  acc 36.41%  2.5 分
+  ep20 step 2500  loss 1.6420  acc 36.47%  3.1 分
+  ep20 step 3000  loss 1.6432  acc 36.49%  3.7 分
+  ep20 step 3500  loss 1.6424  acc 36.48%  4.3 分
+  ep20 step 4000  loss 1.6425  acc 36.48%  4.9 分
+  ep20 step 4500  loss 1.6423  acc 36.48%  5.5 分
+  ep20 step 5000  loss 1.6420  acc 36.48%  6.2 分
+  ep20 step 5500  loss 1.6420  acc 36.48%  6.8 分
+  ep20 step 6000  loss 1.6422  acc 36.49%  7.4 分
+  ep20 step 6500  loss 1.6419  acc 36.50%  8.0 分
+  ep20 step 7000  loss 1.6420  acc 36.50%  8.6 分
+Epoch 20/30  lr 0.000342  |  train loss 1.6420 acc 36.50%  |  val(EMA) loss 1.6855 acc 36.34%  |  11.0 分
+  新的最佳 val(EMA) acc 36.34% —— 已存 best_model.pth
+  ep21 step 500  loss 1.6259  acc 37.20%  0.6 分
+  ep21 step 1000  loss 1.6223  acc 37.41%  1.2 分
+  ep21 step 1500  loss 1.6256  acc 37.25%  1.9 分
+  ep21 step 2000  loss 1.6261  acc 37.24%  2.5 分
+  ep21 step 2500  loss 1.6256  acc 37.25%  3.1 分
+  ep21 step 3000  loss 1.6253  acc 37.21%  3.7 分
+  ep21 step 3500  loss 1.6255  acc 37.20%  4.3 分
+  ep21 step 4000  loss 1.6253  acc 37.22%  4.9 分
+  ep21 step 4500  loss 1.6255  acc 37.21%  5.5 分
+  ep21 step 5000  loss 1.6253  acc 37.21%  6.1 分
+  ep21 step 5500  loss 1.6257  acc 37.16%  6.8 分
+  ep21 step 6000  loss 1.6255  acc 37.16%  7.4 分
+  ep21 step 6500  loss 1.6256  acc 37.16%  8.0 分
+  ep21 step 7000  loss 1.6256  acc 37.15%  8.6 分
+Epoch 21/30  lr 0.000290  |  train loss 1.6257 acc 37.15%  |  val(EMA) loss 1.6821 acc 36.66%  |  11.0 分
+  新的最佳 val(EMA) acc 36.66% —— 已存 best_model.pth
+  ep22 step 500  loss 1.6142  acc 37.78%  0.6 分
+  ep22 step 1000  loss 1.6138  acc 37.66%  1.2 分
+  ep22 step 1500  loss 1.6108  acc 37.77%  1.9 分
+  ep22 step 2000  loss 1.6098  acc 37.84%  2.5 分
+  ep22 step 2500  loss 1.6090  acc 37.87%  3.1 分
+  ep22 step 3000  loss 1.6087  acc 37.89%  3.7 分
+  ep22 step 3500  loss 1.6088  acc 37.85%  4.3 分
+  ep22 step 4000  loss 1.6091  acc 37.79%  4.9 分
+  ep22 step 4500  loss 1.6092  acc 37.80%  5.5 分
+  ep22 step 5000  loss 1.6087  acc 37.80%  6.2 分
+  ep22 step 5500  loss 1.6088  acc 37.77%  6.8 分
+  ep22 step 6000  loss 1.6088  acc 37.77%  7.4 分
+  ep22 step 6500  loss 1.6088  acc 37.78%  8.0 分
+  ep22 step 7000  loss 1.6087  acc 37.79%  8.6 分
+Epoch 22/30  lr 0.000242  |  train loss 1.6087 acc 37.79%  |  val(EMA) loss 1.6789 acc 36.93%  |  11.0 分
+  新的最佳 val(EMA) acc 36.93% —— 已存 best_model.pth
+  ep23 step 500  loss 1.5978  acc 38.25%  0.6 分
+  ep23 step 1000  loss 1.5956  acc 38.41%  1.2 分
+  ep23 step 1500  loss 1.5923  acc 38.45%  1.9 分
+  ep23 step 2000  loss 1.5921  acc 38.50%  2.5 分
+  ep23 step 2500  loss 1.5916  acc 38.50%  3.1 分
+  ep23 step 3000  loss 1.5910  acc 38.52%  3.7 分
+  ep23 step 3500  loss 1.5911  acc 38.56%  4.3 分
+  ep23 step 4000  loss 1.5919  acc 38.52%  4.9 分
+  ep23 step 4500  loss 1.5923  acc 38.50%  5.5 分
+  ep23 step 5000  loss 1.5933  acc 38.48%  6.2 分
+  ep23 step 5500  loss 1.5934  acc 38.48%  6.8 分
+  ep23 step 6000  loss 1.5933  acc 38.49%  7.4 分
+  ep23 step 6500  loss 1.5930  acc 38.50%  8.0 分
+  ep23 step 7000  loss 1.5929  acc 38.49%  8.6 分
+Epoch 23/30  lr 0.000196  |  train loss 1.5930 acc 38.49%  |  val(EMA) loss 1.6772 acc 37.17%  |  11.0 分
+  新的最佳 val(EMA) acc 37.17% —— 已存 best_model.pth
+  ep24 step 500  loss 1.5849  acc 38.90%  0.6 分
+  ep24 step 1000  loss 1.5821  acc 38.83%  1.2 分
+  ep24 step 1500  loss 1.5810  acc 38.96%  1.9 分
+  ep24 step 2000  loss 1.5780  acc 39.05%  2.5 分
+  ep24 step 2500  loss 1.5771  acc 39.07%  3.1 分
+  ep24 step 3000  loss 1.5765  acc 39.12%  3.7 分
+  ep24 step 3500  loss 1.5765  acc 39.07%  4.3 分
+  ep24 step 4000  loss 1.5760  acc 39.12%  4.9 分
+  ep24 step 4500  loss 1.5765  acc 39.10%  5.5 分
+  ep24 step 5000  loss 1.5766  acc 39.10%  6.2 分
+  ep24 step 5500  loss 1.5766  acc 39.07%  6.8 分
+  ep24 step 6000  loss 1.5764  acc 39.08%  7.4 分
+  ep24 step 6500  loss 1.5764  acc 39.10%  8.0 分
+  ep24 step 7000  loss 1.5771  acc 39.07%  8.6 分
+Epoch 24/30  lr 0.000155  |  train loss 1.5772 acc 39.06%  |  val(EMA) loss 1.6772 acc 37.36%  |  11.0 分
+  新的最佳 val(EMA) acc 37.36% —— 已存 best_model.pth
+  ep25 step 500  loss 1.5685  acc 39.85%  0.6 分
+  ep25 step 1000  loss 1.5665  acc 39.77%  1.2 分
+  ep25 step 1500  loss 1.5655  acc 39.75%  1.9 分
+  ep25 step 2000  loss 1.5649  acc 39.77%  2.5 分
+  ep25 step 2500  loss 1.5640  acc 39.73%  3.1 分
+  ep25 step 3000  loss 1.5637  acc 39.70%  3.7 分
+  ep25 step 3500  loss 1.5635  acc 39.72%  4.3 分
+  ep25 step 4000  loss 1.5635  acc 39.67%  4.9 分
+  ep25 step 4500  loss 1.5638  acc 39.64%  5.5 分
+  ep25 step 5000  loss 1.5634  acc 39.65%  6.1 分
+  ep25 step 5500  loss 1.5635  acc 39.65%  6.8 分
+  ep25 step 6000  loss 1.5634  acc 39.65%  7.4 分
+  ep25 step 6500  loss 1.5631  acc 39.65%  8.0 分
+  ep25 step 7000  loss 1.5629  acc 39.65%  8.6 分
+Epoch 25/30  lr 0.000118  |  train loss 1.5630 acc 39.65%  |  val(EMA) loss 1.6778 acc 37.36%  |  11.0 分
+  ep26 step 500  loss 1.5527  acc 39.83%  0.6 分
+  ep26 step 1000  loss 1.5520  acc 40.06%  1.2 分
+  ep26 step 1500  loss 1.5497  acc 40.15%  1.9 分
+  ep26 step 2000  loss 1.5497  acc 40.19%  2.5 分
+  ep26 step 2500  loss 1.5490  acc 40.19%  3.1 分
+  ep26 step 3000  loss 1.5493  acc 40.18%  3.7 分
+  ep26 step 3500  loss 1.5494  acc 40.18%  4.3 分
+  ep26 step 4000  loss 1.5489  acc 40.19%  4.9 分
+  ep26 step 4500  loss 1.5487  acc 40.19%  5.5 分
+  ep26 step 5000  loss 1.5488  acc 40.19%  6.1 分
+  ep26 step 5500  loss 1.5491  acc 40.16%  6.8 分
+  ep26 step 6000  loss 1.5492  acc 40.15%  7.4 分
+  ep26 step 6500  loss 1.5496  acc 40.13%  8.0 分
+  ep26 step 7000  loss 1.5494  acc 40.13%  8.6 分
+Epoch 26/30  lr 0.000086  |  train loss 1.5494 acc 40.13%  |  val(EMA) loss 1.6797 acc 37.51%  |  11.1 分
+  新的最佳 val(EMA) acc 37.51% —— 已存 best_model.pth
+  ep27 step 500  loss 1.5338  acc 40.41%  0.7 分
+  ep27 step 1000  loss 1.5360  acc 40.54%  1.4 分
+  ep27 step 1500  loss 1.5379  acc 40.60%  2.1 分
+  ep27 step 2000  loss 1.5379  acc 40.64%  2.7 分
+  ep27 step 2500  loss 1.5380  acc 40.66%  3.3 分
+  ep27 step 3000  loss 1.5375  acc 40.69%  4.0 分
+  ep27 step 3500  loss 1.5381  acc 40.68%  4.7 分
+  ep27 step 4000  loss 1.5378  acc 40.67%  5.3 分
+  ep27 step 4500  loss 1.5380  acc 40.62%  6.0 分
+  ep27 step 5000  loss 1.5379  acc 40.64%  6.6 分
+  ep27 step 5500  loss 1.5378  acc 40.64%  7.3 分
+  ep27 step 6000  loss 1.5376  acc 40.63%  8.0 分
+  ep27 step 6500  loss 1.5377  acc 40.63%  8.7 分
+  ep27 step 7000  loss 1.5373  acc 40.64%  9.3 分
+Epoch 27/30  lr 0.000059  |  train loss 1.5373 acc 40.65%  |  val(EMA) loss 1.6815 acc 37.60%  |  11.9 分
+  新的最佳 val(EMA) acc 37.60% —— 已存 best_model.pth
+  ep28 step 500  loss 1.5375  acc 40.59%  0.8 分
+  ep28 step 1000  loss 1.5366  acc 40.74%  1.4 分
+  ep28 step 1500  loss 1.5337  acc 40.84%  2.1 分
+  ep28 step 2000  loss 1.5339  acc 40.78%  2.8 分
+  ep28 step 2500  loss 1.5341  acc 40.73%  3.5 分
+  ep28 step 3000  loss 1.5336  acc 40.74%  4.1 分
+  ep28 step 3500  loss 1.5326  acc 40.77%  4.8 分
+  ep28 step 4000  loss 1.5314  acc 40.80%  5.5 分
+  ep28 step 4500  loss 1.5311  acc 40.84%  6.2 分
+  ep28 step 5000  loss 1.5306  acc 40.87%  6.9 分
+  ep28 step 5500  loss 1.5303  acc 40.87%  7.5 分
+  ep28 step 6000  loss 1.5302  acc 40.89%  8.1 分
+  ep28 step 6500  loss 1.5301  acc 40.92%  8.8 分
+  ep28 step 7000  loss 1.5301  acc 40.91%  9.5 分
+Epoch 28/30  lr 0.000038  |  train loss 1.5301 acc 40.91%  |  val(EMA) loss 1.6832 acc 37.65%  |  11.9 分
+  新的最佳 val(EMA) acc 37.65% —— 已存 best_model.pth
+  ep29 step 500  loss 1.5284  acc 41.09%  0.7 分
+  ep29 step 1000  loss 1.5253  acc 41.23%  1.4 分
+  ep29 step 1500  loss 1.5238  acc 41.23%  2.1 分
+  ep29 step 2000  loss 1.5216  acc 41.28%  2.7 分
+  ep29 step 2500  loss 1.5229  acc 41.26%  3.4 分
+  ep29 step 3000  loss 1.5225  acc 41.29%  4.2 分
+  ep29 step 3500  loss 1.5226  acc 41.28%  4.9 分
+  ep29 step 4000  loss 1.5228  acc 41.24%  5.6 分
+  ep29 step 4500  loss 1.5224  acc 41.26%  6.2 分
+  ep29 step 5000  loss 1.5230  acc 41.23%  6.9 分
+  ep29 step 5500  loss 1.5231  acc 41.24%  7.6 分
+  ep29 step 6000  loss 1.5226  acc 41.26%  8.2 分
+  ep29 step 6500  loss 1.5231  acc 41.22%  8.9 分
+  ep29 step 7000  loss 1.5228  acc 41.23%  9.6 分
+Epoch 29/30  lr 0.000022  |  train loss 1.5228 acc 41.23%  |  val(EMA) loss 1.6845 acc 37.67%  |  12.1 分
+  新的最佳 val(EMA) acc 37.67% —— 已存 best_model.pth
+  ep30 step 500  loss 1.5232  acc 41.07%  0.6 分
+  ep30 step 1000  loss 1.5228  acc 41.05%  1.2 分
+  ep30 step 1500  loss 1.5226  acc 41.10%  1.9 分
+  ep30 step 2000  loss 1.5226  acc 41.08%  2.5 分
+  ep30 step 2500  loss 1.5223  acc 41.07%  3.4 分
+  ep30 step 3000  loss 1.5208  acc 41.13%  4.7 分
+  ep30 step 3500  loss 1.5206  acc 41.18%  6.0 分
+  ep30 step 4000  loss 1.5206  acc 41.19%  7.4 分
+  ep30 step 4500  loss 1.5204  acc 41.19%  8.7 分
+  ep30 step 5000  loss 1.5204  acc 41.19%  10.0 分
+  ep30 step 5500  loss 1.5203  acc 41.20%  11.3 分
+  ep30 step 6000  loss 1.5201  acc 41.21%  12.7 分
+  ep30 step 6500  loss 1.5198  acc 41.24%  14.0 分
+  ep30 step 7000  loss 1.5198  acc 41.24%  15.3 分
+Epoch 30/30  lr 0.000013  |  train loss 1.5197 acc 41.25%  |  val(EMA) loss 1.6850 acc 37.72%  |  20.1 分
+  新的最佳 val(EMA) acc 37.72% —— 已存 best_model.pth
+
+============================================================
+訓練完成，總耗時 342.7 分（5.71 小時），最佳 val acc: 37.72%
+
+【各棋力等級分類指標】
+Rank  Precision (%)  Recall (%)  F1-score (%)  Support
+   D          57.60       59.74         58.65    10000
+   C          41.73       37.75         39.64    10000
+   B          32.19       34.25         33.19    10000
+   A          27.16       26.00         26.57    10000
+  1D          31.30       33.13         32.19    10000
+  2D          30.55       25.20         27.62    10000
+  3D          30.82       30.76         30.79    10000
+  4D          32.48       32.21         32.35    10000
+  5D          35.54       36.84         36.18    10000
+  6D          54.43       61.34         57.68    10000
+
+【混淆矩陣 (Confusion Matrix)】(列=真實等級, 欄=預測等級)
+         Pred_D  Pred_C  Pred_B  Pred_A  Pred_1D  Pred_2D  Pred_3D  Pred_4D  Pred_5D  Pred_6D
+True_D     5974    2121    1153     408      176       83       50       18       10        7
+True_C     2585    3775    1946     841      380      236      131       59       32       15
+True_B     1184    1724    3425    1629      890      514      339      196       61       38
+True_A      356     789    1917    2600     1644     1102      778      476      245       93
+True_1D     128     275     962    1517     3313     1138     1157      824      483      203
+True_2D      67     191     691    1183     1595     2520     1490     1108      788      367
+True_3D      42     105     328     756     1233     1207     3076     1484     1179      590
+True_4D      16      48     144     425      811      805     1508     3221     1828     1194
+True_5D      14      12      65     164      407      446      979     1600     3684     2629
+True_6D       5       6      10      51      136      198      473      930     2057     6134
+============================================================
+
+訓練曲線已儲存為 training_curve.png
+各棋力等級預測準確度折線圖已儲存為 rank_accuracy_curve.png
+競賽計分指標比較折線圖已儲存為 competition_metrics_curve.png
+測試集檔案尚未提供，略過預測與 submission 輸出。

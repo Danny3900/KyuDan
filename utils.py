@@ -1,4 +1,5 @@
 import os
+import re
 from collections import deque
 
 import numpy as np
@@ -6,16 +7,38 @@ import pandas as pd
 from sgfmill import sgf, boards
 import sgfmill
 
+# 標準 19 路讓子棋（HD[2] ~ HD[9]）在 sgfmill 座標系 (row, col) 下的星位預擺座標
+HANDICAP_POSITIONS = {
+    2: [(15, 15), (3, 3)],
+    3: [(15, 15), (3, 3), (15, 3)],
+    4: [(15, 15), (3, 3), (15, 3), (3, 15)],
+    5: [(15, 15), (3, 3), (15, 3), (3, 15), (9, 9)],
+    6: [(15, 15), (3, 3), (15, 3), (3, 15), (9, 3), (9, 15)],
+    7: [(15, 15), (3, 3), (15, 3), (3, 15), (9, 3), (9, 15), (9, 9)],
+    8: [(15, 15), (3, 3), (15, 3), (3, 15), (9, 3), (9, 15), (15, 9), (3, 9)],
+    9: [(15, 15), (3, 3), (15, 3), (3, 15), (9, 3), (9, 15), (15, 9), (3, 9), (9, 9)],
+}
+
+
 class SGFParseRankPrediction:
     """
     Class to parse SGF files and extract features for rank prediction.
-    Each feature array has shape (history_length*2, 19, 19)
-    2 channels per board state: one for black stones, one for white stones.
+    Each feature array has shape (history_length*2 + 4, 19, 19) = (504, 19, 19)
+    - First 500 channels: 2 channels per board state (target player stones, opponent stones)
+    - Channel 500: target player color (1 if Black, 0 if White)
+    - Channel 501: is_handicap_1 (1 if HD == 1 else 0)
+    - Channel 502: is_giving_handicap (1 if HD >= 1 and target player is White else 0)
+    - Channel 503: is_taking_handicap (1 if HD >= 1 and target player is Black else 0)
     """
 
     def __init__(self, history_length: int = 250):
         # number of previous board states to include in history
         self.history_length = history_length
+
+    @staticmethod
+    def _parse_handicap(game_content: str) -> int:
+        m = re.search(r'HD\[(\d+)\]', game_content[:64])
+        return int(m.group(1)) if m else 0
 
     def _prepare_board(self, board: sgfmill.boards.Board):
         board_np = np.zeros((19, 19), np.int8)
@@ -27,10 +50,16 @@ class SGFParseRankPrediction:
                 board_np[y, x] = -1 # label white stones as -1 on the board
         return board_np
 
-    def _extract_game_states(self, game):
+    def _extract_game_states(self, game, hd: int = 0):
         board = sgfmill.boards.Board(19) # Empty board
         board_states = [] # Board state after every move
-        
+
+        # 還原 HD[2] ~ HD[9] 開局預先擺在星位上的讓子：
+        # 官方 SGF 將讓子對局的第 1 手轉記為 ;B[...]，故預擺於星位的受讓子在 SGF 內對應顏色為 'w'
+        if hd in HANDICAP_POSITIONS:
+            for r, c in HANDICAP_POSITIONS[hd]:
+                board.play(r, c, 'w')
+
         for node in game.get_main_sequence():
             move = node.get_move()
             # 跳過 SGF 空盤根節點 (move[0] is None)，確保索引 0 嚴格對應第 1 手落子
@@ -53,7 +82,7 @@ class SGFParseRankPrediction:
                 break
         return board_states
 
-    def _extract_features(self, board_states, color: str = 'B'):
+    def _extract_features(self, board_states, color: str = 'B', hd: int = 0):
         features = []
         # 不足 250 手時改於末端補零 (Post-padding)，確保所有棋局從第 1 手固定對齊在最前面通道
         if len(board_states) < self.history_length:
@@ -71,9 +100,18 @@ class SGFParseRankPrediction:
             features.append((t == my_val).astype(np.float32))  # target player moves
             features.append((t == opp_val).astype(np.float32)) # opponent moves
 
-        # 第 501 個通道：目標玩家執黑填 1，執白填 0
+        # 第 501 個通道 (idx 500)：目標玩家執黑填 1，執白填 0
         color_plane = np.ones((19, 19), dtype=np.float32) if is_black else np.zeros((19, 19), dtype=np.float32)
         features.append(color_plane)
+
+        # 第 502 ~ 504 個通道 (idx 501..503)：官方 v1.1 新增之讓子資訊 (HD[n]) 與執子顏色交叉特徵
+        is_hd = hd >= 1
+        hd_plane = np.ones((19, 19), dtype=np.float32) if is_hd else np.zeros((19, 19), dtype=np.float32)
+        giving_hd_plane = np.ones((19, 19), dtype=np.float32) if (is_hd and not is_black) else np.zeros((19, 19), dtype=np.float32)
+        taking_hd_plane = np.ones((19, 19), dtype=np.float32) if (is_hd and is_black) else np.zeros((19, 19), dtype=np.float32)
+        features.append(hd_plane)
+        features.append(giving_hd_plane)
+        features.append(taking_hd_plane)
 
         features = np.array(features)
         return features
@@ -84,7 +122,7 @@ class SGFParseRankPrediction:
             game_content: str -- SGF file content as a string
             color: str -- target player's stone color ('B' or 'W')
         Returns:
-            features_list: np.ndarray -- shape (history_length*2 + 1, 19, 19)
+            features_list: np.ndarray -- shape (history_length*2 + 4, 19, 19)
             error: Optional[Exception] -- exception if parsing failed, else None
         """
         try:
@@ -92,9 +130,10 @@ class SGFParseRankPrediction:
         except Exception as e:
             return None, e
 
-        board_states = self._extract_game_states(game)
+        hd = self._parse_handicap(game_content)
+        board_states = self._extract_game_states(game, hd=hd)
         # Extract features within the history length
-        features_list = self._extract_features(board_states, color=color)
+        features_list = self._extract_features(board_states, color=color, hd=hd)
         # Convert to uint8 to save space
         # Later in training, convert back to float32
         return np.array(features_list, dtype=np.uint8), None

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class SEBlock(nn.Module):
-    """Squeeze-and-Excitation 通道注意力機制：動態強化關鍵手數、新落子、氣數快照與邊界特徵通道。"""
+    """Squeeze-and-Excitation 通道注意力機制：動態強化關鍵手數、新落子、區間提死子、氣數快照與邊界特徵通道。"""
     def __init__(self, channels, reduction=8):
         super().__init__()
         mid_channels = max(channels // reduction, 8)
@@ -19,40 +19,62 @@ class SEBlock(nn.Module):
         return x * w
 
 
+class DropPath(nn.Module):
+    """Stochastic Depth (隨機深度)：訓練時以 drop_prob 機率隨機將整條殘差分支歸零，防止深層殘差塊聯合過擬合。"""
+    def __init__(self, drop_prob=0.0):
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x):
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+        return x.div(keep_prob) * random_tensor
+
+
 class ResidualBlock(nn.Module):
-    def __init__(self, channels, use_se=True, se_reduction=8):
+    def __init__(self, channels, use_se=True, se_reduction=8, drop_path=0.0):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(channels, momentum=0.05)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
         self.bn2 = nn.BatchNorm2d(channels, momentum=0.05)
         self.se = SEBlock(channels, reduction=se_reduction) if use_se else nn.Identity()
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
     def forward(self, x):
         residual = x
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out = self.se(out)
+        out = self.drop_path(out)
         out += residual
         return F.relu(out)
 
 class GoRankResNet(nn.Module):
     """
     A ResNet-based model for ranking Go positions.
-    Input: (B, 501, 19, 19) -> GPU 即時推導逐手新落子 (500)、10 個關鍵時期氣數快照 (60) 與棋盤邊界線 (2)，共 1063 通道
+    Input: (B, 504, 19, 19) -> 原始 500 層盤面 + 1 層執子顏色 + 3 層讓子特徵 (HD>=1, 讓子方W, 受讓方B)
+           + GPU 即時推導逐手新落子 (500)、10 個時期區間累積提死子 (20)、10 個時期氣數快照 (60) 與棋盤邊界線 (2)，共 1086 通道
     Output: (B, 10) - scores for the 10 rank classes
     """
-    # 擴展模型容量為 256 通道 × 16 層 SE-ResNet 殘差塊，結合全域池化 + 3x3 九宮格區域池化與 256 維分類頭。
-    def __init__(self, in_channels=501, num_channels=256, num_blocks=16, num_classes=10):
+    # 擴展模型容量為 256 通道 × 16 層 SE-ResNet 殘差塊 (含線性遞增 DropPath)，結合全域池化 + 3x3 九宮格區域池化與 256 維分類頭。
+    def __init__(self, in_channels=504, history_length=250, num_channels=256, num_blocks=16, num_classes=10, drop_path_rate=0.10):
         super().__init__()
-        self.history_length = (in_channels - 1) // 2
+        self.history_length = history_length
         self.history_channels = self.history_length * 2
-        # 每 25 手取一次戰局氣數快照（第 25, 50, ..., 250 手，共 10 個時期 × 雙方 2 人 × 3 種氣 = 60 通道）
+        # 每 25 手取一次區間累積提死子 (10 * 2 = 20 通道) 與戰局氣數快照 (10 * 2 * 3 = 60 通道)
         self.snapshot_indices = list(range(24, self.history_length, 25))
+        self.capture_interval_channels = len(self.snapshot_indices) * 2
         self.liberty_channels = len(self.snapshot_indices) * 6
         self.border_channels = 2
-        # 原始 501 通道 + 逐手新落子 500 通道 + 關鍵時期氣數快照 60 通道 + 棋盤邊界線 2 通道 = 1063 通道
-        total_in_channels = in_channels + self.history_channels + self.liberty_channels + self.border_channels
+        # 基礎 504 通道 + 逐手新落子 500 通道 + 區間累積提死子 20 通道 + 關鍵時期氣數快照 60 通道 + 棋盤邊界線 2 通道 = 1086 通道
+        total_in_channels = (
+            in_channels + self.history_channels + self.capture_interval_channels
+            + self.liberty_channels + self.border_channels
+        )
 
         # 預先建立連通塊座標編號 (1..361) 與棋盤邊界線特徵 (一二線邊界層 + 三四線定石層)
         coord_ids = torch.arange(1, 19 * 19 + 1, dtype=torch.float32).view(1, 1, 19, 19)
@@ -71,8 +93,9 @@ class GoRankResNet(nn.Module):
         self.conv_in = nn.Conv2d(total_in_channels, num_channels, 3, padding=1)
         self.bn_in = nn.BatchNorm2d(num_channels, momentum=0.05)
         
+        dp_rates = [drop_path_rate * i / max(num_blocks - 1, 1) for i in range(num_blocks)]
         self.layers = nn.Sequential(
-            *[ResidualBlock(num_channels, use_se=True, se_reduction=8) for _ in range(num_blocks)]
+            *[ResidualBlock(num_channels, use_se=True, se_reduction=8, drop_path=dp_rates[i]) for i in range(num_blocks)]
         )
         # 3x3 九宮格區域池化：將 19x19 棋盤濃縮為「四角、四邊、中腹」9 個戰略區域 (64 * 3 * 3 = 576 維)
         self.spatial_conv = nn.Sequential(
@@ -153,7 +176,8 @@ class GoRankResNet(nn.Module):
         """
         於 GPU 即時從前 500 個逐手盤面通道推導（不增加磁碟分片體積與 I/O 負擔）：
         - new_moves (500 通道): 每一手剛落下的新子位置 (S_t - S_{t-1} == +1)
-        - liberty_planes (60 通道): 第 25, 50, ..., 250 手雙方的 1 氣、2 氣、>=3 氣戰術快照（取代稀疏的 500 層提死子）
+        - capture_intervals (20 通道): 每 25 手一區間（共 10 個時期）雙方被提死子的累積位置，補齊快照間的吃子交換資訊
+        - liberty_planes (60 通道): 第 25, 50, ..., 250 手雙方的 1 氣、2 氣、>=3 氣戰術快照
         - border_planes (2 通道): 棋盤一二線邊界層與三四線定石層
         """
         b = x.size(0)
@@ -167,11 +191,20 @@ class GoRankResNet(nn.Module):
             [boards[:, :1], F.relu(diff_next)], dim=1
         ).reshape(b, self.history_channels, 19, 19)
 
+        # 將 250 手逐手提死子按每 25 手切為 10 個時期取區間最大值 (amax)，濃縮為 20 個高密度通道
+        dead_captures_all = torch.cat(
+            [torch.zeros_like(boards[:, :1]), F.relu(-diff_next)], dim=1
+        )
+        num_intervals = len(self.snapshot_indices)
+        capture_intervals = dead_captures_all.view(
+            b, num_intervals, self.history_length // num_intervals, 2, 19, 19
+        ).amax(dim=2).reshape(b, self.capture_interval_channels, 19, 19)
+
         snap_boards = boards[:, self.snapshot_indices]
         liberty_planes = self._compute_snapshot_liberty_planes(snap_boards, x.dtype)
         border_planes = self.border_planes.expand(b, -1, -1, -1).to(x.dtype)
 
-        return torch.cat([x, new_moves, liberty_planes, border_planes], dim=1)
+        return torch.cat([x, new_moves, capture_intervals, liberty_planes, border_planes], dim=1)
 
     def forward(self, x):
         x = self._append_tactical_and_spatial_planes(x)
